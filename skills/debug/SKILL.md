@@ -10,10 +10,6 @@ description: >
   trace events; asks to investigate or diagnose a specific session;
   reports a customer-reported issue tied to a conversation.
 version: 0.2.0
-tags:
-  - debug
-  - transcripts
-  - voiceflow
 ---
 
 # Voiceflow Agent Debugging

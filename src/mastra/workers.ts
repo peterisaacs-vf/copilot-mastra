@@ -1,4 +1,5 @@
 import { Agent } from '@mastra/core/agent';
+import type { Workspace } from '@mastra/core/workspace';
 import { loadMarkdownBody } from '../lib/loadPrompt';
 import { mainModel, triageModel } from './models';
 import { loadPromptingGuideTool } from '../tools/promptingGuide';
@@ -15,7 +16,7 @@ export interface WorkerSpec {
   description: string;
   /** agents/<x>.md — instruction body (source of truth). */
   agentFile: string;
-  /** skills/<name>/SKILL.md to inject into instructions (injection mode; Workspace upgrade later). */
+  /** Primary skill names (skills/<name>/SKILL.md). Loaded on demand via the skill tool, named in the preamble. */
   skills: string[];
   tier: Tier;
   maxTokens?: number;
@@ -49,17 +50,27 @@ export const LIVE_TOOL_REFERENCE = [
   'never write to Main directly (clone/use a working environment); always verify after applying.',
 ].join('\n');
 
+/** Instructions = agent .md body + a skill-loading preamble + the live tool reference.
+ *  Skill BODIES are no longer injected — they're loaded on demand via the workspace skill tools. */
 function instructionsFor(spec: { agentFile: string; skills: string[] }): string {
-  const parts: string[] = [loadMarkdownBody(spec.agentFile)];
-  for (const s of spec.skills) {
-    parts.push(`\n\n---\n\n# Skill: ${s}\n\n${loadMarkdownBody(`skills/${s}/SKILL.md`)}`);
-  }
-  parts.push(`\n\n---\n\n${LIVE_TOOL_REFERENCE}`);
-  return parts.join('');
+  const body = loadMarkdownBody(spec.agentFile);
+  const primary = spec.skills.map((s) => `\`${s}\``).join(', ');
+  const skillNote = spec.skills.length
+    ? [
+        '\n\n---\n\n# Skills (load on demand)',
+        `Your methodology lives in skills, not in this prompt. BEFORE substantive work, load your primary skill(s) with the \`skill\` tool: ${primary}.`,
+        'Use `skill_search` to discover other relevant skills (e.g. environments, wiring-architect, prompting, knowledge-base) and `skill_read` for a skill’s reference files. Do not work from memory — load the skill.',
+      ].join('\n')
+    : '';
+  return [body, skillNote, `\n\n---\n\n${LIVE_TOOL_REFERENCE}`].join('');
 }
 
-/** Build a synchronous worker agent from its .md + skills + model tier. */
-export function buildWorker(spec: WorkerSpec, tools: Record<string, any> = {}): Agent {
+/** Build a synchronous worker agent from its .md + model tier, with the shared skill workspace. */
+export function buildWorker(
+  spec: WorkerSpec,
+  tools: Record<string, any> = {},
+  workspace?: Workspace,
+): Agent {
   return new Agent({
     id: spec.id,
     name: spec.name,
@@ -67,6 +78,7 @@ export function buildWorker(spec: WorkerSpec, tools: Record<string, any> = {}): 
     instructions: instructionsFor(spec),
     model: TIER_MODEL[spec.tier],
     tools: { ...tools, ...(spec.localTools ?? {}) },
+    workspace,
     defaultOptions: {
       maxSteps: DEFAULT_MAX_STEPS,
       modelSettings: { maxOutputTokens: spec.maxTokens ?? DEFAULT_MAX_TOKENS },
@@ -77,12 +89,12 @@ export function buildWorker(spec: WorkerSpec, tools: Record<string, any> = {}): 
 /**
  * The orchestrator = Mastra supervisor. Its `agents` map auto-creates an
  * `agent-<key>` tool per worker; it routes using its instructions + each
- * worker's description. We inject ONLY orchestrator.md (routing logic) — the
- * workers carry their own skills, so we don't bloat the router with all of them.
+ * worker's description. We inject ONLY orchestrator.md (routing logic).
  */
 export function buildOrchestrator(
   agents: Record<string, Agent>,
   tools: Record<string, any> = {},
+  workspace?: Workspace,
 ): Agent {
   return new Agent({
     id: 'orchestrator',
@@ -93,6 +105,7 @@ export function buildOrchestrator(
     model: mainModel,
     tools,
     agents,
+    workspace,
     defaultOptions: {
       maxSteps: DEFAULT_MAX_STEPS,
       modelSettings: { maxOutputTokens: DEFAULT_MAX_TOKENS },

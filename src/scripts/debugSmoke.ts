@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildDebugAgent, runDebug } from '../mastra/agents/debugAgent';
 import { getVoiceflowTools } from '../mastra/mcp';
+import { getSkillWorkspace } from '../mastra/workspace';
 import { hasVoiceflowToken } from '../config/env';
 import { extractLogs, parseTranscript, type ParsedTranscript } from '../lib/vfParseTranscript';
 
@@ -65,7 +66,11 @@ async function main(): Promise<void> {
     }
   }
 
-  const agent = buildDebugAgent(tools);
+  const workspace = await getSkillWorkspace().catch((e) => {
+    console.warn('[smoke] skill workspace unavailable:', (e as Error).message);
+    return undefined;
+  });
+  const agent = buildDebugAgent(tools, workspace);
   const prompt = [
     'Debug this Voiceflow transcript using your methodology.',
     `Reported issue: ${reportedIssue || '(not specified — identify the most significant failure)'}`,

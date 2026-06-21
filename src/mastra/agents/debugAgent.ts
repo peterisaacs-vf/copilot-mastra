@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { mainModel } from '../models';
 import { loadMarkdownBody } from '../../lib/loadPrompt';
 import { extractJsonObject } from '../../lib/extractJson';
+import type { Workspace } from '@mastra/core/workspace';
 
 /**
  * Structured result of a single-transcript debug. Core fields
@@ -69,20 +70,15 @@ const OUTPUT_CONTRACT = [
 /** Compose instructions from the source-of-truth files + live grounding. */
 function buildDebugInstructions(): string {
   const agentBody = loadMarkdownBody('agents/debug-agent.md');
-  const skillBody = loadMarkdownBody('skills/debug/SKILL.md');
-  return [
-    agentBody,
-    '\n\n---\n\n# Debug methodology (skill: debug)\n\n',
-    skillBody,
-    '\n\n---\n\n',
-    LIVE_TOOL_REFERENCE,
-    '\n\n',
-    OUTPUT_CONTRACT,
-  ].join('');
+  const skillNote = [
+    '\n\n---\n\n# Skills (load on demand)',
+    'Your debug methodology and failure patterns live in the `debug` skill. BEFORE any analysis, load it with the `skill` tool (skill: debug) and follow it exactly — including the Step 2 two-pass prompt-extraction gate. Use `skill_search` for related skills (audit-wiring, wiring-architect, functions) and `skill_read` for reference files. Do not work from memory — load the skill.',
+  ].join('\n');
+  return [agentBody, skillNote, '\n\n---\n\n', LIVE_TOOL_REFERENCE, '\n\n', OUTPUT_CONTRACT].join('');
 }
 
 export const DEBUG_AGENT_DESCRIPTION =
-  'Systematic Voiceflow transcript debugger. Diagnoses a single transcript — finds the problem turn, the root-cause category, the evidence, and the concrete fix. Pre-loaded with the full debug methodology.';
+  'Systematic Voiceflow transcript debugger. Diagnoses a single transcript — finds the problem turn, the root-cause category, the evidence, and the concrete fix. Loads the full debug methodology from its skill.';
 
 /**
  * Build the debug-agent. `tools` is the Voiceflow MCP toolset (from
@@ -97,7 +93,7 @@ export const DEBUG_AGENT_DESCRIPTION =
 export const DEBUG_MAX_STEPS = 12;
 export const DEBUG_MAX_TOKENS = 8000;
 
-export function buildDebugAgent(tools: Record<string, any> = {}): Agent {
+export function buildDebugAgent(tools: Record<string, any> = {}, workspace?: Workspace): Agent {
   return new Agent({
     id: 'debug-agent',
     name: 'debug-agent',
@@ -105,6 +101,7 @@ export function buildDebugAgent(tools: Record<string, any> = {}): Agent {
     instructions: buildDebugInstructions(),
     model: mainModel,
     tools,
+    workspace,
     defaultOptions: {
       maxSteps: DEBUG_MAX_STEPS,
       modelSettings: { maxOutputTokens: DEBUG_MAX_TOKENS },
