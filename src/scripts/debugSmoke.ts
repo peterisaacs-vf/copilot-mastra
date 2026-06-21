@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { buildDebugAgent, debugResultSchema } from '../mastra/agents/debugAgent';
+import { buildDebugAgent, runDebug } from '../mastra/agents/debugAgent';
 import { getVoiceflowTools } from '../mastra/mcp';
 import { hasVoiceflowToken } from '../config/env';
 import { extractLogs, parseTranscript, type ParsedTranscript } from '../lib/vfParseTranscript';
@@ -76,10 +76,7 @@ async function main(): Promise<void> {
     rendered,
   ].join('\n');
 
-  const res = await agent.generate(prompt, {
-    structuredOutput: { schema: debugResultSchema, errorStrategy: 'warn' },
-    maxSteps: 12,
-  });
+  const res = await runDebug(agent, prompt);
 
   console.log('\n=== DEBUG RESULT (structured) ===');
   console.log(JSON.stringify(res.object, null, 2));

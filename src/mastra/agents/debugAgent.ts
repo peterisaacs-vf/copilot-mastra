@@ -86,6 +86,15 @@ export const DEBUG_AGENT_DESCRIPTION =
  * Build the debug-agent. `tools` is the Voiceflow MCP toolset (from
  * `getVoiceflowTools()`); pass `{}` to run on an inline transcript with no tools.
  */
+/**
+ * Loop + output guardrails (gotcha #2). maxSteps bounds TOOL steps; it does NOT
+ * bound generation length — GLM 5.2 reasons heavily and, uncapped, a single
+ * generation ran ~22 minutes. The real cost/latency guardrail is the token cap,
+ * which lives under modelSettings.maxTokens (Mastra's CallSettings field).
+ */
+export const DEBUG_MAX_STEPS = 12;
+export const DEBUG_MAX_TOKENS = 8000;
+
 export function buildDebugAgent(tools: Record<string, any> = {}): Agent {
   return new Agent({
     id: 'debug-agent',
@@ -94,10 +103,28 @@ export function buildDebugAgent(tools: Record<string, any> = {}): Agent {
     instructions: buildDebugInstructions(),
     model: mainModel,
     tools,
-    // gotcha #2 — bound the loop explicitly (cost guardrail). Debug needs a few
-    // tool calls (transcript, evals, KB, playbook), so allow more than the default 5.
     defaultOptions: {
-      maxSteps: 12,
+      maxSteps: DEBUG_MAX_STEPS,
+      modelSettings: { maxOutputTokens: DEBUG_MAX_TOKENS },
+    },
+  });
+}
+
+/**
+ * Run the debug-agent and get the validated structured result in `res.object`.
+ *
+ * jsonPromptInjection:true is REQUIRED for GLM over the OpenAI-compatible endpoint —
+ * without it the model emits ad-hoc JSON and Mastra leaves res.object undefined.
+ * modelSettings.maxTokens bounds the reasoning so the call actually terminates.
+ */
+export async function runDebug(agent: Agent, input: string) {
+  return agent.generate(input, {
+    maxSteps: DEBUG_MAX_STEPS,
+    modelSettings: { maxOutputTokens: DEBUG_MAX_TOKENS },
+    structuredOutput: {
+      schema: debugResultSchema,
+      jsonPromptInjection: true,
+      errorStrategy: 'warn',
     },
   });
 }
