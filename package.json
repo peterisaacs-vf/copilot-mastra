@@ -1,0 +1,30 @@
+{
+  "name": "copilot-mastra",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "description": "Voiceflow copilot rebuilt on Mastra + GLM (Fireworks). Faithful port of the voiceflow/mcp-plugin.",
+  "scripts": {
+    "dev": "mastra dev",
+    "build": "mastra build",
+    "typecheck": "tsc --noEmit",
+    "smoke:debug": "tsx src/scripts/debugSmoke.ts",
+    "test:parse": "tsx src/scripts/testParse.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "1.0.41",
+    "@mastra/core": "1.45.0",
+    "@mastra/mcp": "1.11.0",
+    "dotenv": "^16.4.7",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "mastra": "1.15.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

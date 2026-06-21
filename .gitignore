@@ -1,0 +1,20 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+build/
+
+# Mastra Studio / local dev
+.mastra/
+
+# env & secrets (NEVER commit real keys)
+.env
+.env.local
+.env.*.local
+
+# logs / misc
+*.log
+npm-debug.log*
+.DS_Store
+coverage/
