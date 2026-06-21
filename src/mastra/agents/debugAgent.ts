@@ -2,6 +2,7 @@ import { Agent } from '@mastra/core/agent';
 import { z } from 'zod';
 import { mainModel } from '../models';
 import { loadMarkdownBody } from '../../lib/loadPrompt';
+import { extractJsonObject } from '../../lib/extractJson';
 
 /**
  * Structured result of a single-transcript debug. Core fields
@@ -62,6 +63,7 @@ const OUTPUT_CONTRACT = [
   '- fix: the concrete change (exact text + where it goes)',
   '- confidence: low | medium | high',
   '- needsDeeperInvestigation: gaps you could not verify, each with the next step',
+  'Output raw JSON only — no markdown code fences, no prose before or after the JSON object.',
 ].join('\n');
 
 /** Compose instructions from the source-of-truth files + live grounding. */
@@ -111,14 +113,24 @@ export function buildDebugAgent(tools: Record<string, any> = {}): Agent {
 }
 
 /**
- * Run the debug-agent and get the validated structured result in `res.object`.
+ * Run the debug-agent and get the validated structured result.
  *
- * jsonPromptInjection:true is REQUIRED for GLM over the OpenAI-compatible endpoint —
- * without it the model emits ad-hoc JSON and Mastra leaves res.object undefined.
- * modelSettings.maxTokens bounds the reasoning so the call actually terminates.
+ * jsonPromptInjection:true makes GLM follow the schema; modelSettings.maxOutputTokens
+ * bounds the reasoning. GLM still tends to wrap the JSON in ```json fences, which
+ * defeats Mastra's strict parse (res.object undefined) — so we fall back to a
+ * fence-tolerant extraction and validate it against the same Zod schema.
  */
-export async function runDebug(agent: Agent, input: string) {
-  return agent.generate(input, {
+export interface DebugRun {
+  result: DebugResult | null;
+  usedFallbackParse: boolean;
+  text: string;
+  reasoningText: string;
+  finishReason?: string;
+  usage?: unknown;
+}
+
+export async function runDebug(agent: Agent, input: string): Promise<DebugRun> {
+  const res = await agent.generate(input, {
     maxSteps: DEBUG_MAX_STEPS,
     modelSettings: { maxOutputTokens: DEBUG_MAX_TOKENS },
     structuredOutput: {
@@ -127,4 +139,26 @@ export async function runDebug(agent: Agent, input: string) {
       errorStrategy: 'warn',
     },
   });
+  const r = res as {
+    object?: unknown;
+    text?: string;
+    reasoningText?: string;
+    finishReason?: string;
+    usage?: unknown;
+  };
+  const base = {
+    text: r.text ?? '',
+    reasoningText: r.reasoningText ?? '',
+    finishReason: r.finishReason,
+    usage: r.usage,
+  };
+
+  const direct = debugResultSchema.safeParse(r.object);
+  if (direct.success) return { result: direct.data, usedFallbackParse: false, ...base };
+
+  const extracted = extractJsonObject(r.text ?? '');
+  const fallback = debugResultSchema.safeParse(extracted);
+  if (fallback.success) return { result: fallback.data, usedFallbackParse: true, ...base };
+
+  return { result: null, usedFallbackParse: false, ...base };
 }

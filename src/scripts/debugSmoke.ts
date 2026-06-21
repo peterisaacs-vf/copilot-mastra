@@ -76,15 +76,18 @@ async function main(): Promise<void> {
     rendered,
   ].join('\n');
 
-  const res = await runDebug(agent, prompt);
+  const run = await runDebug(agent, prompt);
 
   console.log('\n=== DEBUG RESULT (structured) ===');
-  console.log(JSON.stringify(res.object, null, 2));
+  console.log(JSON.stringify(run.result, null, 2));
+  console.log(
+    `\n[meta] usedFallbackParse=${run.usedFallbackParse} finishReason=${run.finishReason} reasoningChars=${run.reasoningText.length}`,
+  );
+  console.log('[meta] usage:', JSON.stringify(run.usage));
 
-  const reasoning = (res as { reasoningText?: string }).reasoningText;
-  if (reasoning) {
-    console.log('\n=== reasoning (first 800 chars) ===');
-    console.log(reasoning.slice(0, 800));
+  if (!run.result) {
+    console.log('\n[diag] no parseable result — raw text (last 800):');
+    console.log(JSON.stringify(run.text.slice(-800)));
   }
 }
 
