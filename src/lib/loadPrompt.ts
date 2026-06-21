@@ -38,6 +38,11 @@ function findProjectRoot(): string {
   return cachedRoot;
 }
 
+/** Absolute project root (where agents/, skills/, reference/ live). */
+export function projectRoot(): string {
+  return findProjectRoot();
+}
+
 /**
  * Load a markdown prompt/skill file and return its body with YAML frontmatter
  * stripped. Paths are relative to the project root, so prompts/skills stay

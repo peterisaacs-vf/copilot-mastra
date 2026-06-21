@@ -1,6 +1,8 @@
 import { Agent } from '@mastra/core/agent';
 import { loadMarkdownBody } from '../lib/loadPrompt';
 import { mainModel, triageModel } from './models';
+import { loadPromptingGuideTool } from '../tools/promptingGuide';
+import { diffPromptsTool } from '../tools/diffPrompts';
 
 export type Tier = 'main' | 'triage';
 
@@ -17,6 +19,8 @@ export interface WorkerSpec {
   skills: string[];
   tier: Tier;
   maxTokens?: number;
+  /** Local (non-MCP) createTool tools to attach, keyed by tool name. */
+  localTools?: Record<string, unknown>;
 }
 
 const TIER_MODEL: Record<Tier, typeof mainModel> = {
@@ -62,7 +66,7 @@ export function buildWorker(spec: WorkerSpec, tools: Record<string, any> = {}): 
     description: spec.description,
     instructions: instructionsFor(spec),
     model: TIER_MODEL[spec.tier],
-    tools,
+    tools: { ...tools, ...(spec.localTools ?? {}) },
     defaultOptions: {
       maxSteps: DEFAULT_MAX_STEPS,
       modelSettings: { maxOutputTokens: spec.maxTokens ?? DEFAULT_MAX_TOKENS },
@@ -113,6 +117,7 @@ export const WORKER_SPECS: WorkerSpec[] = [
     agentFile: 'agents/build-agent.md',
     skills: ['build-agent', 'document'],
     tier: 'main',
+    localTools: { loadPromptingGuide: loadPromptingGuideTool, diffPrompts: diffPromptsTool },
   },
   {
     key: 'review-agent',
@@ -123,6 +128,7 @@ export const WORKER_SPECS: WorkerSpec[] = [
     agentFile: 'agents/review-agent.md',
     skills: ['build-agent', 'document'],
     tier: 'main',
+    localTools: { loadPromptingGuide: loadPromptingGuideTool, diffPrompts: diffPromptsTool },
   },
   {
     key: 'audit-kb-agent',
