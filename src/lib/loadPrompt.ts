@@ -10,5 +10,8 @@ export function loadMarkdownBody(relPath: string): string {
   const abs = resolve(process.cwd(), relPath);
   const raw = readFileSync(abs, 'utf8');
   const fm = raw.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/);
-  return (fm ? raw.slice(fm[0].length) : raw).trim();
+  let body = fm ? raw.slice(fm[0].length) : raw;
+  // drop a leftover leading '---' line (some agent .md files have double frontmatter)
+  body = body.replace(/^\s*---\s*\r?\n/, '');
+  return body.trim();
 }
