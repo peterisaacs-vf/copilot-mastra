@@ -9,6 +9,7 @@ import { promptOptimizerWorkflow } from './workflows/promptOptimizer';
 import type { MastraStorage } from '@mastra/core/storage';
 import type { Memory } from '@mastra/memory';
 import { VercelDeployer } from '@mastra/deployer-vercel';
+import { registerApiRoute } from '@mastra/core/server';
 import { MastraEditor } from '@mastra/editor';
 import { getPostgresUrl, makePostgresStore, makeLibsqlStore } from './storage';
 import { pgMemory, localMemory } from './memory';
@@ -53,25 +54,31 @@ try {
 // pgvector is verified, so a recall failure can't break agent calls.
 let storage: MastraStorage;
 let memory: Memory | undefined;
+// Readable storage diagnostics, surfaced via GET /_diag/storage (logs truncate errors).
+const storageDiag: Record<string, unknown> = {};
+const redact = (s: string) => s.replace(/:[^:@/\s]+@/, ':***@');
 const pgUrl = getPostgresUrl();
 if (pgUrl) {
   try {
     const pg = makePostgresStore(pgUrl);
     await Promise.race([
       pg.init(),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('pg init timeout (10s)')), 10_000)),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('pg init timeout (20s)')), 20_000)),
     ]);
     storage = pg;
     memory = pgMemory(pg, pgUrl, false);
+    Object.assign(storageDiag, { mode: 'postgres', host: (() => { try { return new URL(pgUrl).host; } catch { return '?'; } })(), memory: true });
     console.info('[storage] postgres ready; [memory] enabled (threads)');
   } catch (e: any) {
     storage = makeLibsqlStore();
     memory = undefined;
+    Object.assign(storageDiag, { mode: 'libsql-fallback', memory: false, code: e?.code ?? null, error: redact(String(e?.message ?? e)) });
     console.error(`[pg-fail] ${e?.code ?? '?'} ${String(e?.message ?? e).slice(0, 110)} -> libsql fallback`);
   }
 } else {
   storage = makeLibsqlStore();
   memory = process.env.VERCEL ? undefined : localMemory();
+  Object.assign(storageDiag, { mode: 'libsql', pgUrlPresent: false, memory: Boolean(memory) });
   console.info(`[storage] libsql; [memory] ${memory ? 'local' : 'off (set DATABASE_URL for durable memory)'}`);
 }
 
@@ -95,6 +102,16 @@ export const mastra = new Mastra({
   // Durable store chosen above: Postgres (Neon) when reachable, else LibSQL.
   // Backs workflow runs, memory threads, and the editor.
   storage,
+  server: {
+    // Diagnostic: reports whether Postgres connected (and the full error if not),
+    // since Vercel's runtime logs truncate the message.
+    apiRoutes: [
+      registerApiRoute('/_diag/storage', {
+        method: 'GET',
+        handler: async (c) => c.json(storageDiag),
+      }),
+    ],
+  },
   // Editor: lets Studio manage/version agent instructions + prompt blocks (stored
   // in `storage`). Durable with Postgres; ephemeral on the /tmp fallback.
   editor: new MastraEditor(),
