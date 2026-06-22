@@ -6,10 +6,12 @@ import { getVoiceflowTools } from './mcp';
 import { getSkillWorkspace } from './workspace';
 import { analyzeTranscriptsWorkflow } from './workflows/analyzeTranscripts';
 import { promptOptimizerWorkflow } from './workflows/promptOptimizer';
+import type { MastraStorage } from '@mastra/core/storage';
+import type { Memory } from '@mastra/memory';
 import { VercelDeployer } from '@mastra/deployer-vercel';
 import { MastraEditor } from '@mastra/editor';
-import { getStorage, hasPostgres } from './storage';
-import { buildMemory } from './memory';
+import { getPostgresUrl, makePostgresStore, makeLibsqlStore } from './storage';
+import { pgMemory, localMemory } from './memory';
 import { hasVoiceflowToken, hasGlmKey } from '../config/env';
 
 if (!hasGlmKey()) {
@@ -45,14 +47,33 @@ try {
   console.warn('[workspace] failed to init skill workspace:', (err as Error).message);
 }
 
-// Shared agent memory: conversation threads + semantic recall. Durable only with
-// a Postgres connection string; otherwise undefined on serverless (see buildMemory).
-const memory = buildMemory();
-console.info(
-  memory
-    ? `[memory] enabled (${hasPostgres() ? 'postgres' : 'libsql'} + semantic recall)`
-    : '[memory] not enabled — set DATABASE_URL (Postgres) to turn on durable memory',
-);
+// Storage + memory (resilient): try Postgres, eagerly run migrations so a bad DB
+// fails HERE (caught) rather than 500-ing every request, then fall back to LibSQL.
+// Memory is threads-only for now (durable history); semantic recall is added once
+// pgvector is verified, so a recall failure can't break agent calls.
+let storage: MastraStorage;
+let memory: Memory | undefined;
+const pgUrl = getPostgresUrl();
+if (pgUrl) {
+  try {
+    const pg = makePostgresStore(pgUrl);
+    await Promise.race([
+      pg.init(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('pg init timeout (10s)')), 10_000)),
+    ]);
+    storage = pg;
+    memory = pgMemory(pg, pgUrl, false);
+    console.info('[storage] postgres ready; [memory] enabled (threads)');
+  } catch (e: any) {
+    storage = makeLibsqlStore();
+    memory = undefined;
+    console.error(`[pg-fail] ${e?.code ?? '?'} ${String(e?.message ?? e).slice(0, 110)} -> libsql fallback`);
+  }
+} else {
+  storage = makeLibsqlStore();
+  memory = process.env.VERCEL ? undefined : localMemory();
+  console.info(`[storage] libsql; [memory] ${memory ? 'local' : 'off (set DATABASE_URL for durable memory)'}`);
+}
 
 // Workers (debug has its own structured-output helper; the rest come from specs).
 const workers: Record<string, Agent> = {
@@ -71,9 +92,9 @@ export const mastra = new Mastra({
     'analyze-transcripts': analyzeTranscriptsWorkflow,
     'prompt-optimizer': promptOptimizerWorkflow,
   },
-  // Durable store: Postgres (Neon) when DATABASE_URL is set, else LibSQL (/tmp on
-  // serverless). Backs workflow runs, memory threads, and the editor.
-  storage: getStorage(),
+  // Durable store chosen above: Postgres (Neon) when reachable, else LibSQL.
+  // Backs workflow runs, memory threads, and the editor.
+  storage,
   // Editor: lets Studio manage/version agent instructions + prompt blocks (stored
   // in `storage`). Durable with Postgres; ephemeral on the /tmp fallback.
   editor: new MastraEditor(),
