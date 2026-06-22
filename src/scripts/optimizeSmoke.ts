@@ -40,9 +40,21 @@ async function main(): Promise<void> {
   };
 
   const examples = [
-    { input: "I have a copper pipe leaking under my kitchen sink. It's residential, zip 60614, no warranty.", context: 'New caller, first message — volunteers several fields at once.' },
-    { input: "None of those times work, I'm only free late evenings.", context: 'Mid-booking; the agent has been repeatedly asking for the name.' },
-    { input: 'Actually, never mind — I will deal with it later. Bye.', context: 'Caller abandoning before the booking completes.' },
+    {
+      userTurns: [
+        'I have a copper pipe leaking under my kitchen sink',
+        'Residential',
+        '60614',
+        'No, first time',
+        "It's a copper pipe under the kitchen sink, no warranty",
+        "None of those times work, I'm only free late evenings",
+      ],
+      context: 'New caller who volunteers details out of order and never gives a name.',
+    },
+    {
+      userTurns: ['I need to book an appliance repair', "Actually, never mind — I'll deal with it later. Bye"],
+      context: 'Caller abandons before the booking completes.',
+    },
   ];
 
   const run = await promptOptimizerWorkflow.createRun();

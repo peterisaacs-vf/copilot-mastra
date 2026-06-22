@@ -17,20 +17,23 @@ import {
  * Prompt optimizer (GEPA) as a durable Mastra workflow (port of prompt-optimizer-agent).
  *   prepare -> optimize (baseline score -> reflect -> score candidates -> pareto-select, per round) -> finalize (diff)
  *
- * Scoring is LOCAL SIMULATION (token-less): runner GLM produces a response for
- * each example under a candidate prompt; a judge GLM scores it against the rubric
- * built from the agent definition; the weighted 0-1 score drives pareto selection
- * (quality 80% vs brevity 20%). Reflection (main tier) proposes targeted/structural/
- * compressed candidates and must never weaken the definition's hard rules.
+ * Scoring is MULTI-TURN LOCAL SIMULATION (token-less): for each scenario, the runner
+ * GLM plays the agent under a candidate prompt across the scripted user turns, producing
+ * a full conversation; a judge GLM scores the WHOLE conversation against the rubric built
+ * from the agent definition. Multi-turn is what surfaces loop / dead-end / no-End-on-
+ * abandonment failures, so candidates that fix them actually score higher. The weighted
+ * 0-1 score drives pareto selection (quality 80% vs brevity 20%).
  *
- * Durability: the workflow run persists via the Mastra LibSQL store. Per-round
- * suspend/resume is a later upgrade; the GEPA loop runs inside the optimize step.
+ * Reflection (main tier) proposes targeted/structural/compressed candidates and must never
+ * weaken the definition's hard rules. Durability: the run persists via the LibSQL store;
+ * per-round suspend/resume is a later upgrade. Live multi-turn scoring via VF
+ * test_conversation (token-gated) is the higher-fidelity upgrade.
  */
 
 // ---------- schemas ----------
-const exampleSchema = z.object({
-  input: z.string().describe('A representative user message / scenario the agent must handle'),
-  context: z.string().optional().describe('Optional prior conversation context'),
+const scenarioSchema = z.object({
+  userTurns: z.array(z.string()).min(1).describe('Scripted user turns for a multi-turn scenario the agent must handle'),
+  context: z.string().optional().describe('Optional situational context for the scenario'),
 });
 
 const definitionSchema = z.record(z.string(), z.unknown());
@@ -38,7 +41,7 @@ const definitionSchema = z.record(z.string(), z.unknown());
 const workflowInputSchema = z.object({
   systemPrompt: z.string(),
   definition: definitionSchema,
-  examples: z.array(exampleSchema).min(1),
+  examples: z.array(scenarioSchema).min(1),
   maxRounds: z.number().int().default(2),
   candidatesPerRound: z.number().int().default(3),
   focus: z.string().default(''),
@@ -48,7 +51,7 @@ const preparedSchema = z.object({
   systemPrompt: z.string(),
   rubric: z.string(),
   definition: definitionSchema,
-  examples: z.array(exampleSchema),
+  examples: z.array(scenarioSchema),
   maxRounds: z.number().int(),
   candidatesPerRound: z.number().int(),
   focus: z.string(),
@@ -107,14 +110,14 @@ const runnerAgent = new Agent({
   name: 'opt-runner',
   instructions: 'Respond to the user as instructed by the system prompt provided per request.',
   model: mainModel,
-  defaultOptions: { maxSteps: 1, modelSettings: { maxOutputTokens: 700 } },
+  defaultOptions: { maxSteps: 1, modelSettings: { maxOutputTokens: 500 } },
 });
 
 const judgeAgent = new Agent({
   id: 'opt-judge',
   name: 'opt-judge',
   instructions:
-    'You are an impartial evaluator. You receive a scoring rubric and an agent response. Score each dimension 0-10 with specific feedback per the rubric. Output raw JSON only — no markdown fences.',
+    'You are an impartial evaluator. You receive a scoring rubric and a full multi-turn conversation. Score each dimension 0-10 with specific feedback per the rubric, watching for loops, dead-ends, and failure to end on abandonment. Output raw JSON only — no markdown fences.',
   model: mainModel,
   defaultOptions: { maxSteps: 1, modelSettings: { maxOutputTokens: 1200 } },
 });
@@ -124,7 +127,7 @@ const reflectionAgent = new Agent({
   name: 'opt-reflection',
   instructions: [
     'You are a prompt optimization specialist (GEPA reflection).',
-    'Given the CURRENT system prompt, the agent definition, and failing examples with judge feedback, propose improved candidate prompts.',
+    'Given the CURRENT system prompt, the agent definition, and failing multi-turn conversations with judge feedback, propose improved candidate prompts.',
     'Produce candidates using DISTINCT strategies:',
     '- targeted: minimal surgical fixes to the specific failing behaviors;',
     '- structural: reorganize/clarify sections and add any missing rules;',
@@ -136,9 +139,29 @@ const reflectionAgent = new Agent({
   defaultOptions: { maxSteps: 1, modelSettings: { maxOutputTokens: 7000 } },
 });
 
-interface ExampleScore {
-  input: string;
-  response: string;
+type ChatMsg = { role: 'user' | 'assistant'; content: string };
+
+/** Play the agent (under `prompt`) across the scripted user turns; return the rendered conversation. */
+async function runDialogue(prompt: string, userTurns: string[], context?: string): Promise<string> {
+  const messages: ChatMsg[] = [];
+  const lines: string[] = [];
+  for (let i = 0; i < userTurns.length; i++) {
+    const content = i === 0 && context ? `[Scenario context: ${context}]\n${userTurns[i]}` : userTurns[i];
+    messages.push({ role: 'user', content });
+    const res = (await runnerAgent.generate(messages as Parameters<typeof runnerAgent.generate>[0], {
+      instructions: prompt,
+      maxSteps: 1,
+      modelSettings: { maxOutputTokens: 500 },
+    })) as { text?: string };
+    const assistant = res.text ?? '';
+    messages.push({ role: 'assistant', content: assistant });
+    lines.push(`Turn ${i + 1}\nUSER: ${userTurns[i]}\nAGENT: ${assistant}`);
+  }
+  return lines.join('\n\n');
+}
+
+interface ScenarioScore {
+  transcript: string;
   score: number;
   feedback: string;
 }
@@ -146,28 +169,21 @@ interface ExampleScore {
 async function scorePrompt(
   prompt: string,
   rubric: string,
-  examples: z.infer<typeof exampleSchema>[],
+  scenarios: z.infer<typeof scenarioSchema>[],
   weights: AgentDefinition['rubric_weights'],
-): Promise<{ avg: number; perExample: ExampleScore[] }> {
-  const perExample = await Promise.all(
-    examples.map(async (ex) => {
-      const runRes = (await runnerAgent.generate(ex.input, {
-        instructions: prompt,
-        maxSteps: 1,
-        modelSettings: { maxOutputTokens: 700 },
-      })) as { text?: string };
-      const response = runRes.text ?? '';
+): Promise<{ avg: number; per: ScenarioScore[] }> {
+  const per = await Promise.all(
+    scenarios.map(async (sc) => {
+      const transcript = await runDialogue(prompt, sc.userTurns, sc.context);
       const judgePrompt = [
         rubric,
         '',
-        '--- PRIOR CONTEXT ---',
-        ex.context ?? '(none)',
-        '--- USER INPUT ---',
-        ex.input,
-        '--- AGENT RESPONSE ---',
-        response,
+        'Score the ENTIRE multi-turn conversation below. Watch for: looping on a field, dead-ends, ignoring out-of-order info, and failing to end/handoff on abandonment.',
         '',
-        'Score the response now.',
+        '--- CONVERSATION ---',
+        transcript,
+        '',
+        'Score the conversation now.',
       ].join('\n');
       const j = await generateStructured(judgeAgent, judgePrompt, judgeSchema, { maxSteps: 1, maxTokens: 1200 });
       const d = j.result ?? {
@@ -181,11 +197,11 @@ async function scorePrompt(
         { accuracy: d.accuracy.score, tone: d.tone.score, completeness: d.completeness.score, safety: d.safety.score },
         weights,
       );
-      return { input: ex.input, response, score, feedback: d.overall_feedback };
+      return { transcript, score, feedback: d.overall_feedback };
     }),
   );
-  const avg = perExample.reduce((s, r) => s + r.score, 0) / (perExample.length || 1);
-  return { avg: Math.round(avg * 10000) / 10000, perExample };
+  const avg = per.reduce((s, r) => s + r.score, 0) / (per.length || 1);
+  return { avg: Math.round(avg * 10000) / 10000, per };
 }
 
 // ---------- steps ----------
@@ -195,7 +211,6 @@ const prepareStep = createStep({
   outputSchema: preparedSchema,
   execute: async ({ inputData }) => {
     const def = inputData.definition as AgentDefinition;
-    const defWarnings = validateDefinition(def);
     return {
       systemPrompt: inputData.systemPrompt,
       rubric: buildRubric(def),
@@ -204,7 +219,7 @@ const prepareStep = createStep({
       maxRounds: inputData.maxRounds,
       candidatesPerRound: inputData.candidatesPerRound,
       focus: inputData.focus,
-      defWarnings,
+      defWarnings: validateDefinition(def),
     };
   },
 });
@@ -219,7 +234,7 @@ const optimizeStep = createStep({
     const weights = def.rubric_weights;
 
     const baseline = await scorePrompt(systemPrompt, rubric, examples, weights);
-    const lowScoring = [...baseline.perExample].sort((a, b) => a.score - b.score).slice(0, 4);
+    const lowScoring = [...baseline.per].sort((a, b) => a.score - b.score).slice(0, 3);
 
     let best = { prompt: systemPrompt, score: baseline.avg, strategy: 'baseline' };
     const rounds: z.infer<typeof roundSchema>[] = [];
@@ -235,9 +250,9 @@ const optimizeStep = createStep({
         '=== CURRENT SYSTEM PROMPT ===',
         best.prompt,
         '',
-        '=== FAILING EXAMPLES (input / agent response / judge feedback) ===',
+        '=== FAILING CONVERSATIONS (transcript / judge feedback) ===',
         lowScoring
-          .map((e, i) => `[${i + 1}] INPUT: ${e.input}\nRESPONSE: ${e.response}\nFEEDBACK: ${e.feedback} (score ${e.score})`)
+          .map((e, i) => `[${i + 1}] (score ${e.score})\n${e.transcript.slice(0, 1600)}\nJUDGE: ${e.feedback}`)
           .join('\n\n'),
       ]
         .filter(Boolean)
