@@ -63,8 +63,8 @@ async function main(): Promise<void> {
       systemPrompt,
       definition,
       examples,
-      maxRounds: 1,
-      candidatesPerRound: 2,
+      maxRounds: Number(process.env.OPT_ROUNDS ?? 1),
+      candidatesPerRound: Number(process.env.OPT_CANDIDATES ?? 2),
       focus: 'accept out-of-order intake without looping, and call End on abandonment',
     },
   })) as { status?: string; result?: unknown; error?: unknown };
