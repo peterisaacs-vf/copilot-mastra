@@ -4,6 +4,7 @@ import { mainModel } from '../models';
 import { loadMarkdownBody } from '../../lib/loadPrompt';
 import { extractJsonObject } from '../../lib/extractJson';
 import type { Workspace } from '@mastra/core/workspace';
+import type { Memory } from '@mastra/memory';
 
 /**
  * Structured result of a single-transcript debug. Core fields
@@ -93,7 +94,11 @@ export const DEBUG_AGENT_DESCRIPTION =
 export const DEBUG_MAX_STEPS = 12;
 export const DEBUG_MAX_TOKENS = 8000;
 
-export function buildDebugAgent(tools: Record<string, any> = {}, workspace?: Workspace): Agent {
+export function buildDebugAgent(
+  tools: Record<string, any> = {},
+  workspace?: Workspace,
+  memory?: Memory,
+): Agent {
   return new Agent({
     id: 'debug-agent',
     name: 'debug-agent',
@@ -102,6 +107,7 @@ export function buildDebugAgent(tools: Record<string, any> = {}, workspace?: Wor
     model: mainModel,
     tools,
     workspace,
+    memory,
     defaultOptions: {
       maxSteps: DEBUG_MAX_STEPS,
       modelSettings: { maxOutputTokens: DEBUG_MAX_TOKENS },

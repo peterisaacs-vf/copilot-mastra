@@ -6,14 +6,11 @@ import { getVoiceflowTools } from './mcp';
 import { getSkillWorkspace } from './workspace';
 import { analyzeTranscriptsWorkflow } from './workflows/analyzeTranscripts';
 import { promptOptimizerWorkflow } from './workflows/promptOptimizer';
-import { LibSQLStore } from '@mastra/libsql';
 import { VercelDeployer } from '@mastra/deployer-vercel';
+import { MastraEditor } from '@mastra/editor';
+import { getStorage, hasPostgres } from './storage';
+import { buildMemory } from './memory';
 import { hasVoiceflowToken, hasGlmKey } from '../config/env';
-
-// On a serverless target only /tmp is writable, so the workflow store lives there
-// (ephemeral per-instance — fine for a demo). Locally it's a repo-root file.
-const isServerless = Boolean(process.env.VERCEL);
-const storageUrl = process.env.STORAGE_URL ?? (isServerless ? 'file:/tmp/copilot.db' : 'file:copilot.db');
 
 if (!hasGlmKey()) {
   console.warn(
@@ -48,16 +45,25 @@ try {
   console.warn('[workspace] failed to init skill workspace:', (err as Error).message);
 }
 
+// Shared agent memory: conversation threads + semantic recall. Durable only with
+// a Postgres connection string; otherwise undefined on serverless (see buildMemory).
+const memory = buildMemory();
+console.info(
+  memory
+    ? `[memory] enabled (${hasPostgres() ? 'postgres' : 'libsql'} + semantic recall)`
+    : '[memory] not enabled — set DATABASE_URL (Postgres) to turn on durable memory',
+);
+
 // Workers (debug has its own structured-output helper; the rest come from specs).
 const workers: Record<string, Agent> = {
-  'debug-agent': buildDebugAgent(vfTools, workspace),
+  'debug-agent': buildDebugAgent(vfTools, workspace, memory),
 };
 for (const spec of WORKER_SPECS) {
-  workers[spec.key] = buildWorker(spec, vfTools, workspace);
+  workers[spec.key] = buildWorker(spec, vfTools, workspace, memory);
 }
 
 // Supervisor: delegates to the workers (auto `agent-<key>` tools).
-const orchestrator = buildOrchestrator(workers, vfTools, workspace);
+const orchestrator = buildOrchestrator(workers, vfTools, workspace, memory);
 
 export const mastra = new Mastra({
   agents: { orchestrator, ...workers },
@@ -65,8 +71,12 @@ export const mastra = new Mastra({
     'analyze-transcripts': analyzeTranscriptsWorkflow,
     'prompt-optimizer': promptOptimizerWorkflow,
   },
-  // Durable store for workflow runs (and removes the in-memory warning).
-  storage: new LibSQLStore({ id: 'copilot', url: storageUrl }),
+  // Durable store: Postgres (Neon) when DATABASE_URL is set, else LibSQL (/tmp on
+  // serverless). Backs workflow runs, memory threads, and the editor.
+  storage: getStorage(),
+  // Editor: lets Studio manage/version agent instructions + prompt blocks (stored
+  // in `storage`). Durable with Postgres; ephemeral on the /tmp fallback.
+  editor: new MastraEditor(),
   // Build-time only: emits a Vercel Build Output API bundle (with the Studio SPA).
   // maxDuration is env-driven so it can be tuned to the target plan's ceiling
   // (Hobby 60s / Pro 300s) — agent runs are long, so give them as long as allowed.

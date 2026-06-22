@@ -1,5 +1,6 @@
 import { Agent } from '@mastra/core/agent';
 import type { Workspace } from '@mastra/core/workspace';
+import type { Memory } from '@mastra/memory';
 import { loadMarkdownBody } from '../lib/loadPrompt';
 import { mainModel, triageModel } from './models';
 import { loadPromptingGuideTool } from '../tools/promptingGuide';
@@ -70,6 +71,7 @@ export function buildWorker(
   spec: WorkerSpec,
   tools: Record<string, any> = {},
   workspace?: Workspace,
+  memory?: Memory,
 ): Agent {
   return new Agent({
     id: spec.id,
@@ -79,6 +81,7 @@ export function buildWorker(
     model: TIER_MODEL[spec.tier],
     tools: { ...tools, ...(spec.localTools ?? {}) },
     workspace,
+    memory,
     defaultOptions: {
       maxSteps: DEFAULT_MAX_STEPS,
       modelSettings: { maxOutputTokens: spec.maxTokens ?? DEFAULT_MAX_TOKENS },
@@ -95,6 +98,7 @@ export function buildOrchestrator(
   agents: Record<string, Agent>,
   tools: Record<string, any> = {},
   workspace?: Workspace,
+  memory?: Memory,
 ): Agent {
   return new Agent({
     id: 'orchestrator',
@@ -106,6 +110,7 @@ export function buildOrchestrator(
     tools,
     agents,
     workspace,
+    memory,
     defaultOptions: {
       maxSteps: DEFAULT_MAX_STEPS,
       modelSettings: { maxOutputTokens: DEFAULT_MAX_TOKENS },
