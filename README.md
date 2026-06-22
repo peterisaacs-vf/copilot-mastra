@@ -55,6 +55,45 @@ Scripts:
 | `VF_MCP_URL` | `https://mcp.voiceflow.com/mcp` |
 | `VF_MCP_TOKEN` | Voiceflow MCP bearer — **pending** (see below) |
 
+## Deploy to Vercel
+
+The app builds into a Vercel **Build Output API** bundle that serves the Mastra
+Studio UI + the agents/workflows API from one serverless function:
+
+```bash
+npm run build          # → .vercel/output  (Studio SPA + functions/index.func)
+```
+
+Serverless adaptations (no effect on local dev): data files (`agents/`, `skills/`,
+`reference/`) are embedded at build time (`src/generated/assets.ts`) and materialized
+to a temp dir at cold start; the LibSQL store moves to `/tmp`; `GLM_API_KEY` is read
+leniently so the Studio UI always loads even if the key is unset.
+
+> **Heads-up — function duration.** Serverless functions cap execution at **60s
+> (Hobby) / 300s (Pro)**. Browsing Studio and short single-agent turns are fine;
+> the long multi-step workflows (`analyze-transcripts`, `prompt-optimizer` GEPA, the
+> orchestrator) can exceed that and time out. Set `VERCEL_FN_MAX_DURATION=300` before
+> building on a Pro plan. This is inherent to serverless, not a bug.
+
+**Option A — CLI, prebuilt (deploys the exact tested artifact, key baked in):**
+
+```bash
+npm install
+# put your Fireworks key in .env  (GLM_API_KEY=fw_…)
+npm run build
+npm run vercel:env                 # bakes .env into the function bundle
+npm i -g vercel && vercel login    # one-time
+vercel deploy --prebuilt           # pick scope/project when prompted → returns URL
+```
+
+**Option B — Dashboard / Git import (no CLI):** push this branch, then at
+`vercel.com/new` import the repo (Framework: *Other*; Build Command `npm run build`
+is preconfigured in `vercel.json`), add `GLM_API_KEY` under **Environment Variables**,
+and Deploy.
+
+Only `GLM_API_KEY` is required as an env var; `GLM_BASE_URL` / `GLM_MODEL_*` /
+`VF_MCP_URL` fall back to the Fireworks/GLM defaults if unset.
+
 ## Status
 
 **Ported & working**

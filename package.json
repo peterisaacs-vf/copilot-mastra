@@ -13,6 +13,7 @@
     "prebuild": "npm run generate:assets",
     "build": "mastra build",
     "build:studio": "npm run generate:assets && mastra build --studio",
+    "vercel:env": "tsx src/scripts/copyEnvForVercel.ts",
     "typecheck": "tsc --noEmit",
     "smoke:debug": "tsx src/scripts/debugSmoke.ts",
     "smoke:analyze": "tsx src/scripts/analyzeSmoke.ts",
