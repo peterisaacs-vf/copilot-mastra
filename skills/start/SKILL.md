@@ -1,10 +1,6 @@
 ---
 name: start
-description: >
-  Cold-start onboarding ONLY. Load on an empty/greeting first message or when the
-  user asks "what is this / how do I begin / where do I start". Do NOT load for a
-  specific task (build, debug, prompt, optimize, test, KB, wiring, voice, etc.) —
-  those route to their own skills. This is the first-contact orientation, not a router.
+description: Get started with the Voiceflow plugin — lists your projects and routes you to the right capability.
 ---
 
 You are starting a new Voiceflow Copilot session.
