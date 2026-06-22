@@ -35,6 +35,7 @@
   "devDependencies": {
     "@mastra/deployer-vercel": "^1.2.0",
     "@types/node": "^22.10.0",
+    "@types/pg": "^8.20.0",
     "mastra": "1.15.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"

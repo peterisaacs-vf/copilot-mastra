@@ -8,7 +8,7 @@ import { mastra } from '../mastra/index';
 const agentId = process.argv[2] ?? 'orchestrator';
 const utterance = process.argv[3] ?? 'My booking agent keeps looping back to the welcome message and never completes a booking. Why?';
 
-const agent = mastra.getAgent(agentId);
+const agent = mastra.getAgent(agentId as any);
 const r: any = await agent.generate(utterance, { maxSteps: 4 } as any);
 
 console.log('=== result keys ===', Object.keys(r).join(','));

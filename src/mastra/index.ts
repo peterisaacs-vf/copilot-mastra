@@ -11,7 +11,7 @@ import type { Memory } from '@mastra/memory';
 import { VercelDeployer } from '@mastra/deployer-vercel';
 import { registerApiRoute } from '@mastra/core/server';
 import { MastraEditor } from '@mastra/editor';
-import { getPostgresUrl, makePostgresStore, makeLibsqlStore } from './storage';
+import { getPostgresUrl, makePostgresStore, makeLibsqlStore, probePgvector } from './storage';
 import { pgMemory, localMemory } from './memory';
 import { hasVoiceflowToken, hasGlmKey } from '../config/env';
 
@@ -66,9 +66,17 @@ if (pgUrl) {
       new Promise((_, rej) => setTimeout(() => rej(new Error('pg init timeout (20s)')), 20_000)),
     ]);
     storage = pg;
-    memory = pgMemory(pg, pgUrl, false);
-    Object.assign(storageDiag, { mode: 'postgres', host: (() => { try { return new URL(pgUrl).host; } catch { return '?'; } })(), memory: true });
-    console.info('[storage] postgres ready; [memory] enabled (threads)');
+    const vectorOk = await probePgvector(pgUrl);
+    memory = pgMemory(pg, pgUrl, vectorOk);
+    Object.assign(storageDiag, {
+      mode: 'postgres',
+      host: (() => { try { return new URL(pgUrl).host; } catch { return '?'; } })(),
+      memory: true,
+      lastMessages: 100,
+      workingMemory: true,
+      semanticRecall: vectorOk,
+    });
+    console.info(`[storage] postgres ready; [memory] window(100)+workingMemory${vectorOk ? '+semanticRecall' : ' (no pgvector → recall off)'}`);
   } catch (e: any) {
     storage = makeLibsqlStore();
     memory = undefined;

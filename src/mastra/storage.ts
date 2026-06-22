@@ -1,5 +1,6 @@
 import { LibSQLStore } from '@mastra/libsql';
 import { PostgresStore } from '@mastra/pg';
+import { Client } from 'pg';
 
 /** Neon/Postgres needs SSL; rejectUnauthorized:false avoids cert-chain issues on serverless. */
 export const PG_SSL = { rejectUnauthorized: false } as const;
@@ -31,6 +32,26 @@ export const hasPostgres = (): boolean => Boolean(getPostgresUrl());
 
 export function makePostgresStore(url: string): PostgresStore {
   return new PostgresStore({ id: 'copilot', connectionString: url, ssl: PG_SSL, max: 3 });
+}
+
+/**
+ * Probe whether pgvector is usable (semantic recall depends on it). Runs the exact
+ * statement PgVector needs — CREATE EXTENSION IF NOT EXISTS vector — so if the Neon
+ * role can't enable it, we learn HERE (and disable recall) rather than 500-ing every
+ * agent call that does a recall query. Never throws.
+ */
+export async function probePgvector(url: string): Promise<boolean> {
+  const c = new Client({ connectionString: url, ssl: PG_SSL, connectionTimeoutMillis: 8000, statement_timeout: 8000 });
+  try {
+    await c.connect();
+    await c.query('CREATE EXTENSION IF NOT EXISTS vector');
+    return true;
+  } catch (e: any) {
+    console.warn(`[pgvector] unavailable: ${e?.code ?? '?'} ${String(e?.message ?? e).slice(0, 90)}`);
+    return false;
+  } finally {
+    try { await c.end(); } catch { /* ignore */ }
+  }
 }
 
 export function makeLibsqlStore(): LibSQLStore {
