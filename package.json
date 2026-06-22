@@ -12,6 +12,7 @@
     "build": "mastra build",
     "typecheck": "tsc --noEmit",
     "smoke:debug": "tsx src/scripts/debugSmoke.ts",
+    "smoke:analyze": "tsx src/scripts/analyzeSmoke.ts",
     "test:parse": "tsx src/scripts/testParse.ts"
   },
   "dependencies": {

@@ -4,6 +4,7 @@ import { buildDebugAgent } from './agents/debugAgent';
 import { buildWorker, buildOrchestrator, WORKER_SPECS } from './workers';
 import { getVoiceflowTools } from './mcp';
 import { getSkillWorkspace } from './workspace';
+import { analyzeTranscriptsWorkflow } from './workflows/analyzeTranscripts';
 import { hasVoiceflowToken } from '../config/env';
 
 // Voiceflow MCP tools — graceful no-token fallback so Studio still boots.
@@ -45,4 +46,5 @@ const orchestrator = buildOrchestrator(workers, vfTools, workspace);
 
 export const mastra = new Mastra({
   agents: { orchestrator, ...workers },
+  workflows: { 'analyze-transcripts': analyzeTranscriptsWorkflow },
 });
