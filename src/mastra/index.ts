@@ -7,7 +7,20 @@ import { getSkillWorkspace } from './workspace';
 import { analyzeTranscriptsWorkflow } from './workflows/analyzeTranscripts';
 import { promptOptimizerWorkflow } from './workflows/promptOptimizer';
 import { LibSQLStore } from '@mastra/libsql';
-import { hasVoiceflowToken } from '../config/env';
+import { VercelDeployer } from '@mastra/deployer-vercel';
+import { hasVoiceflowToken, hasGlmKey } from '../config/env';
+
+// On a serverless target only /tmp is writable, so the workflow store lives there
+// (ephemeral per-instance — fine for a demo). Locally it's a repo-root file.
+const isServerless = Boolean(process.env.VERCEL);
+const storageUrl = process.env.STORAGE_URL ?? (isServerless ? 'file:/tmp/copilot.db' : 'file:copilot.db');
+
+if (!hasGlmKey()) {
+  console.warn(
+    '[glm] GLM_API_KEY not set — Studio will load and you can browse agents/workflows, ' +
+      'but agent/model calls will fail until you set GLM_API_KEY.',
+  );
+}
 
 // Voiceflow MCP tools — graceful no-token fallback so Studio still boots.
 let vfTools: Record<string, any> = {};
@@ -53,5 +66,12 @@ export const mastra = new Mastra({
     'prompt-optimizer': promptOptimizerWorkflow,
   },
   // Durable store for workflow runs (and removes the in-memory warning).
-  storage: new LibSQLStore({ id: 'copilot', url: 'file:copilot.db' }),
+  storage: new LibSQLStore({ id: 'copilot', url: storageUrl }),
+  // Build-time only: emits a Vercel Build Output API bundle (with the Studio SPA).
+  // maxDuration is env-driven so it can be tuned to the target plan's ceiling
+  // (Hobby 60s / Pro 300s) — agent runs are long, so give them as long as allowed.
+  deployer: new VercelDeployer({
+    studio: true,
+    maxDuration: Number(process.env.VERCEL_FN_MAX_DURATION ?? 60),
+  }),
 });

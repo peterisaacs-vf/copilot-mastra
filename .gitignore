@@ -8,6 +8,9 @@ build/
 # Mastra Studio / local dev
 .mastra/
 
+# Vercel build output / project link
+.vercel/
+
 # env & secrets (NEVER commit real keys)
 .env
 .env.local

@@ -9,7 +9,10 @@
   "description": "Voiceflow copilot rebuilt on Mastra + GLM (Fireworks). Faithful port of the voiceflow/mcp-plugin.",
   "scripts": {
     "dev": "mastra dev",
+    "generate:assets": "tsx src/scripts/embedAssets.ts",
+    "prebuild": "npm run generate:assets",
     "build": "mastra build",
+    "build:studio": "npm run generate:assets && mastra build --studio",
     "typecheck": "tsc --noEmit",
     "smoke:debug": "tsx src/scripts/debugSmoke.ts",
     "smoke:analyze": "tsx src/scripts/analyzeSmoke.ts",
@@ -26,6 +29,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@mastra/deployer-vercel": "^1.2.0",
     "@types/node": "^22.10.0",
     "mastra": "1.15.0",
     "tsx": "^4.19.2",
