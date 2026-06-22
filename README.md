@@ -75,24 +75,26 @@ leniently so the Studio UI always loads even if the key is unset.
 > orchestrator) can exceed that and time out. Set `VERCEL_FN_MAX_DURATION=300` before
 > building on a Pro plan. This is inherent to serverless, not a bug.
 
-**Option A — CLI, prebuilt (deploys the exact tested artifact, key baked in):**
+**Option A — CLI, prebuilt (deploys the exact locally-built artifact):**
 
 ```bash
 npm install
-# put your Fireworks key in .env  (GLM_API_KEY=fw_…)
-npm run build
-npm run vercel:env                 # bakes .env into the function bundle
-npm i -g vercel && vercel login    # one-time
-vercel deploy --prebuilt           # pick scope/project when prompted → returns URL
+npm run build                              # → .vercel/output
+npm i -g vercel && vercel login            # one-time
+vercel deploy --prebuilt -e GLM_API_KEY=fw_your_key   # pick scope when prompted → returns URL
 ```
+
+`-e` injects the key as a runtime env var for that deployment; alternatively run
+`vercel env add GLM_API_KEY` once and drop the flag.
 
 **Option B — Dashboard / Git import (no CLI):** push this branch, then at
 `vercel.com/new` import the repo (Framework: *Other*; Build Command `npm run build`
 is preconfigured in `vercel.json`), add `GLM_API_KEY` under **Environment Variables**,
 and Deploy.
 
-Only `GLM_API_KEY` is required as an env var; `GLM_BASE_URL` / `GLM_MODEL_*` /
-`VF_MCP_URL` fall back to the Fireworks/GLM defaults if unset.
+Only `GLM_API_KEY` is required; `GLM_BASE_URL` / `GLM_MODEL_*` / `VF_MCP_URL` fall
+back to the Fireworks/GLM defaults if unset. (Vercel injects project env vars straight
+into `process.env` at runtime — no `.env` file ships in the bundle.)
 
 ## Status
 
