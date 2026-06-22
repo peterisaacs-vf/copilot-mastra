@@ -3,7 +3,7 @@ import type { MastraStorage } from '@mastra/core/storage';
 import { TokenLimiterProcessor } from '@mastra/core/processors';
 import { PgVector } from '@mastra/pg';
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql';
-import { glmProvider } from './models';
+import { glmProvider, triageModel } from './models';
 import { PG_SSL } from './storage';
 
 /** Fireworks embedding model (768-dim) for semantic recall — same provider/key as the chat models. */
@@ -54,6 +54,33 @@ export function makeContextProcessors(limit: number = CONTEXT_TOKEN_BUDGET) {
 const SEMANTIC_RECALL = { topK: 5, messageRange: 3, scope: 'resource' as const };
 
 /**
+ * Observational Memory — the framework-native "compaction". Two background agents
+ * (Observer + Reflector) watch the conversation and compress raw history into a dense
+ * observation log once it crosses a token threshold (observe ~30k, reflect ~40k by
+ * default), tracking the "current task" so the agent picks up where it left off. This is
+ * the same idea as Claude Code's compaction: keep a tight, relevant working set instead of
+ * letting raw history rot — except it runs continuously in the background, not at a cliff.
+ *
+ * Choices for our setup:
+ * - Model = triageModel (DeepSeek-V4-Flash): on OM's tested-model list, cheap + fast for
+ *   background work, and reuses our existing Fireworks provider (no new key). Sets both
+ *   the Observer and the Reflector.
+ * - scope: 'thread' (NOT resource). Thread scope is well-tested; resource scope is
+ *   experimental and explicitly hazardous for *concurrent* threads — where one thread can
+ *   "continue" another's unfinished work. That's exactly our orchestrator+worker swarm, so
+ *   resource scope is the wrong choice here. Cross-thread continuity is already provided by
+ *   resource-scoped working memory + semantic recall; OM adds intra-thread compaction on
+ *   top (most relevant on the orchestrator's long-running conversation).
+ *
+ * Thread-scoped OM needs a threadId on every call. Studio and the production swarm always
+ * pass one; stateless dev scripts (skillProbe/eval) do not — run those with OM_DISABLED=1.
+ * The same env var is the kill switch if a live issue surfaces.
+ */
+export const OBSERVATIONAL_MEMORY = process.env.OM_DISABLED
+  ? (false as const)
+  : { model: triageModel, scope: 'thread' as const };
+
+/**
  * Working memory: a durable, resource-scoped scratchpad the copilot maintains across
  * threads/sessions (and across the sub-agent swarm, since they share the resource).
  * Survives even when messages age out of the window — this is the real "continuity".
@@ -87,12 +114,12 @@ const WORKING_MEMORY = {
 export function pgMemory(store: MastraStorage, url: string, vectorOk: boolean): Memory {
   const cfg: ConstructorParameters<typeof Memory>[0] = {
     storage: store,
-    options: { lastMessages: LAST_MESSAGES, workingMemory: WORKING_MEMORY },
+    options: { lastMessages: LAST_MESSAGES, workingMemory: WORKING_MEMORY, observationalMemory: OBSERVATIONAL_MEMORY },
   };
   if (vectorOk) {
     cfg.vector = new PgVector({ id: 'copilot-vec', connectionString: url, ssl: PG_SSL });
     cfg.embedder = glmProvider.textEmbeddingModel(EMBED_MODEL);
-    cfg.options = { lastMessages: LAST_MESSAGES, workingMemory: WORKING_MEMORY, semanticRecall: SEMANTIC_RECALL };
+    cfg.options = { lastMessages: LAST_MESSAGES, workingMemory: WORKING_MEMORY, semanticRecall: SEMANTIC_RECALL, observationalMemory: OBSERVATIONAL_MEMORY };
   }
   return new Memory(cfg);
 }
@@ -103,6 +130,6 @@ export function localMemory(): Memory {
     storage: new LibSQLStore({ id: 'copilot-mem', url: 'file:copilot-mem.db' }),
     vector: new LibSQLVector({ id: 'copilot-mem-vec', url: 'file:copilot-mem.db' }),
     embedder: glmProvider.textEmbeddingModel(EMBED_MODEL),
-    options: { lastMessages: LAST_MESSAGES, workingMemory: WORKING_MEMORY, semanticRecall: SEMANTIC_RECALL },
+    options: { lastMessages: LAST_MESSAGES, workingMemory: WORKING_MEMORY, semanticRecall: SEMANTIC_RECALL, observationalMemory: OBSERVATIONAL_MEMORY },
   });
 }

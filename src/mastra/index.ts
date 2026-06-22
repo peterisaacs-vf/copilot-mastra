@@ -12,7 +12,7 @@ import { VercelDeployer } from '@mastra/deployer-vercel';
 import { registerApiRoute } from '@mastra/core/server';
 import { MastraEditor } from '@mastra/editor';
 import { getPostgresUrl, makePostgresStore, makeLibsqlStore, probePgvector } from './storage';
-import { pgMemory, localMemory, CONTEXT_TOKEN_BUDGET } from './memory';
+import { pgMemory, localMemory, CONTEXT_TOKEN_BUDGET, OBSERVATIONAL_MEMORY } from './memory';
 import { hasVoiceflowToken, hasGlmKey } from '../config/env';
 
 if (!hasGlmKey()) {
@@ -76,8 +76,9 @@ if (pgUrl) {
       workingMemory: true,
       semanticRecall: vectorOk,
       tokenBudget: CONTEXT_TOKEN_BUDGET,
+      observationalMemory: OBSERVATIONAL_MEMORY ? OBSERVATIONAL_MEMORY.scope : false,
     });
-    console.info(`[storage] postgres ready; [memory] window(100)+workingMemory${vectorOk ? '+semanticRecall' : ' (no pgvector → recall off)'}`);
+    console.info(`[storage] postgres ready; [memory] window(100)+workingMemory${vectorOk ? '+semanticRecall' : ' (no pgvector → recall off)'}${OBSERVATIONAL_MEMORY ? '+observationalMemory' : ''}`);
   } catch (e: any) {
     storage = makeLibsqlStore();
     memory = undefined;
