@@ -5,6 +5,8 @@ import { buildWorker, buildOrchestrator, WORKER_SPECS } from './workers';
 import { getVoiceflowTools } from './mcp';
 import { getSkillWorkspace } from './workspace';
 import { analyzeTranscriptsWorkflow } from './workflows/analyzeTranscripts';
+import { promptOptimizerWorkflow } from './workflows/promptOptimizer';
+import { LibSQLStore } from '@mastra/libsql';
 import { hasVoiceflowToken } from '../config/env';
 
 // Voiceflow MCP tools — graceful no-token fallback so Studio still boots.
@@ -46,5 +48,10 @@ const orchestrator = buildOrchestrator(workers, vfTools, workspace);
 
 export const mastra = new Mastra({
   agents: { orchestrator, ...workers },
-  workflows: { 'analyze-transcripts': analyzeTranscriptsWorkflow },
+  workflows: {
+    'analyze-transcripts': analyzeTranscriptsWorkflow,
+    'prompt-optimizer': promptOptimizerWorkflow,
+  },
+  // Durable store for workflow runs (and removes the in-memory warning).
+  storage: new LibSQLStore({ id: 'copilot', url: 'file:copilot.db' }),
 });

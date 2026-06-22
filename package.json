@@ -13,13 +13,16 @@
     "typecheck": "tsc --noEmit",
     "smoke:debug": "tsx src/scripts/debugSmoke.ts",
     "smoke:analyze": "tsx src/scripts/analyzeSmoke.ts",
+    "smoke:optimize": "tsx src/scripts/optimizeSmoke.ts",
     "test:parse": "tsx src/scripts/testParse.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "1.0.41",
     "@mastra/core": "1.45.0",
+    "@mastra/libsql": "^1.14.0",
     "@mastra/mcp": "1.11.0",
     "dotenv": "^16.4.7",
+    "yaml": "^2.9.0",
     "zod": "4.4.3"
   },
   "devDependencies": {

@@ -13,6 +13,10 @@ build/
 .env.local
 .env.*.local
 
+# local stores (libsql)
+*.db
+*.db-*
+
 # logs / misc
 *.log
 npm-debug.log*
