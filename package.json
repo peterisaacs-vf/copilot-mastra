@@ -12,6 +12,7 @@
     "generate:assets": "tsx src/scripts/embedAssets.ts",
     "prebuild": "npm run generate:assets",
     "build": "mastra build",
+    "postbuild": "tsx src/scripts/fixStudioRoutes.ts",
     "build:studio": "npm run generate:assets && mastra build --studio",
     "typecheck": "tsc --noEmit",
     "smoke:debug": "tsx src/scripts/debugSmoke.ts",
