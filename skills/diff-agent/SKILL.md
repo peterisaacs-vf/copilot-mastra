@@ -8,7 +8,7 @@ use case: comparing a production agent against its dev environment copy.
 
 ## Arguments
 
-$ARGUMENTS — two project names separated by space.
+the user's request — two project names separated by space.
 
 Examples:
 - `/diff-agent because dev-because` — compare prod vs dev

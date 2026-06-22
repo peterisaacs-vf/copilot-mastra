@@ -6,7 +6,7 @@ description: List Voiceflow projects in a workspace
 Quick read-only utility — list the user's Voiceflow projects.
 
 Call `mcp__voiceflow__voiceflow_project` with operation `list`.
-- If `$ARGUMENTS` looks like a workspaceID (24-character hex), pass it as
+- If `the user's request` looks like a workspaceID (24-character hex), pass it as
   the workspaceID.
 - Otherwise, ask the user for their workspaceID once, then list.
 

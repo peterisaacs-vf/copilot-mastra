@@ -9,14 +9,14 @@ variables and function input/output variables. Useful for debugging
 
 ## Arguments
 
-$ARGUMENTS — the project name (or projectID).
+the user's request — the project name (or projectID).
 
 ## Process
 
 ### Step 1: Gather data
 
 Resolve the project by calling `mcp__voiceflow__voiceflow_project` with
-operation `list`. Match `$ARGUMENTS` against project `name`
+operation `list`. Match `the user's request` against project `name`
 (case-insensitive substring). If no match or empty, list and ask.
 
 Then fetch in parallel:

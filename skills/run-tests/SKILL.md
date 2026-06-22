@@ -19,7 +19,7 @@ to the appropriate subagent, and produces a pass/fail summary.
 
 ### Step 1: Load manifest
 
-Read `tests/manifest.yaml`. Parse all scenarios. If `$ARGUMENTS` contains
+Read `tests/manifest.yaml`. Parse all scenarios. If `the user's request` contains
 a filter, apply it:
 
 - If a command type (e.g. `debug-transcript`), filter to scenarios with

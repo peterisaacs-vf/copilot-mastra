@@ -187,7 +187,7 @@ The reflection model:
 
 ### GEPA mode (multi-round)
 
-For deeper optimization, use `$ARGUMENTS` = "gepa" or "multi-round":
+For deeper optimization, use `the user's request` = "gepa" or "multi-round":
 
 **Round 1**: Generate 3 candidate prompts with different strategies:
 - Variant 1: Targeted fixes (minimal edits)

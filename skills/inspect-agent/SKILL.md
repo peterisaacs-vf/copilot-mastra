@@ -8,16 +8,16 @@ No changes are made — this is a "show me everything" command.
 
 ## Arguments
 
-$ARGUMENTS — the project name (or projectID).
+the user's request — the project name (or projectID).
 
 ## Process
 
 ### Step 1: Resolve the project
 
 Call `mcp__voiceflow__voiceflow_project` with operation `list`. Find the
-project whose `name` matches `$ARGUMENTS` (case-insensitive substring is
+project whose `name` matches `the user's request` (case-insensitive substring is
 acceptable). If no match, list the available projects and ask which one.
-If `$ARGUMENTS` is empty, list all and ask.
+If `the user's request` is empty, list all and ask.
 
 Then call `voiceflow_project` op `get` on the chosen project to resolve
 the environmentID. For v1.3 projects (with an `environments` map), use
