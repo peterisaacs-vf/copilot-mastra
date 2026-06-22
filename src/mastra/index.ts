@@ -13,7 +13,8 @@ import { registerApiRoute } from '@mastra/core/server';
 import { MastraEditor } from '@mastra/editor';
 import { getPostgresUrl, makePostgresStore, makeLibsqlStore, probePgvector } from './storage';
 import { pgMemory, localMemory, CONTEXT_TOKEN_BUDGET, OBSERVATIONAL_MEMORY } from './memory';
-import { hasVoiceflowToken, hasGlmKey } from '../config/env';
+import { hasVoiceflowToken, hasGlmKey, useVoiceflowOAuth } from '../config/env';
+import { beginVoiceflowAuthorization, completeVoiceflowAuthorization, hasVoiceflowTokens } from './oauth';
 
 if (!hasGlmKey()) {
   console.warn(
@@ -26,22 +27,29 @@ if (!hasGlmKey()) {
 // mcpDiag is surfaced via GET /_diag/mcp so we can confirm the MCP is wired
 // (token present + tools loaded) with a single curl instead of reading logs.
 let vfTools: Record<string, any> = {};
-const mcpDiag: Record<string, unknown> = { tokenPresent: hasVoiceflowToken(), tools: 0 };
-if (hasVoiceflowToken()) {
+const mcpDiag: Record<string, unknown> = {
+  authMode: useVoiceflowOAuth() ? 'oauth' : 'token',
+  tokenPresent: hasVoiceflowToken(),
+  tools: 0,
+};
+if (useVoiceflowOAuth() || hasVoiceflowToken()) {
   try {
     vfTools = await getVoiceflowTools();
     const names = Object.keys(vfTools);
     mcpDiag.tools = names.length;
     mcpDiag.names = names.slice(0, 40);
-    console.info(`[voiceflow-mcp] loaded ${names.length} tools`);
+    console.info(`[voiceflow-mcp] loaded ${names.length} tools (${useVoiceflowOAuth() ? 'oauth' : 'token'})`);
   } catch (err) {
     mcpDiag.error = (err as Error).message;
     console.warn('[voiceflow-mcp] failed to load tools:', (err as Error).message);
+    if (useVoiceflowOAuth()) {
+      console.warn('[voiceflow-mcp] OAuth mode: if not yet authorized, visit /oauth/start once to consent.');
+    }
   }
 } else {
   console.warn(
-    '[voiceflow-mcp] VF_MCP_TOKEN not set — agents boot WITHOUT Voiceflow tools. ' +
-      'Set VF_MCP_TOKEN in .env to enable live transcript/KB/eval/test access.',
+    '[voiceflow-mcp] VF_MCP_TOKEN not set and VF_AUTH_MODE!=oauth — agents boot WITHOUT ' +
+      'Voiceflow tools. Set VF_MCP_TOKEN (static) or VF_AUTH_MODE=oauth to enable them.',
   );
 }
 
@@ -131,6 +139,49 @@ export const mastra = new Mastra({
       registerApiRoute('/_diag/mcp', {
         method: 'GET',
         handler: async (c) => c.json(mcpDiag),
+      }),
+      // OAuth (VF_AUTH_MODE=oauth): visit /oauth/start once in a browser to consent;
+      // the server redirects you to Voiceflow, then back to /oauth/callback, which
+      // stores the tokens. /oauth/status reports whether we currently hold valid tokens.
+      registerApiRoute('/oauth/start', {
+        method: 'GET',
+        handler: async (c) => {
+          if (!useVoiceflowOAuth()) {
+            return c.text('OAuth mode is off. Set VF_AUTH_MODE=oauth (and VF_MCP_URL to the target server).', 400);
+          }
+          try {
+            const url = await beginVoiceflowAuthorization();
+            if (!url) return c.text('Already authorized — Voiceflow MCP tokens are valid.', 200);
+            return c.redirect(url.toString(), 302);
+          } catch (e: any) {
+            return c.text(`OAuth start failed: ${e?.message ?? e}`, 500);
+          }
+        },
+      }),
+      registerApiRoute('/oauth/callback', {
+        method: 'GET',
+        handler: async (c) => {
+          const error = c.req.query('error');
+          if (error) {
+            return c.text(`Authorization denied: ${error} ${c.req.query('error_description') ?? ''}`, 400);
+          }
+          const code = c.req.query('code');
+          if (!code) return c.text('Missing ?code in callback.', 400);
+          try {
+            await completeVoiceflowAuthorization(code);
+            return c.html(
+              '<h2>✅ Voiceflow MCP authorized</h2><p>Tokens stored. You can close this tab. ' +
+                'The copilot picks up the tools on its next cold start (or redeploy to force it).</p>',
+            );
+          } catch (e: any) {
+            return c.text(`OAuth callback failed: ${e?.message ?? e}`, 500);
+          }
+        },
+      }),
+      registerApiRoute('/oauth/status', {
+        method: 'GET',
+        handler: async (c) =>
+          c.json({ mode: useVoiceflowOAuth() ? 'oauth' : 'token', hasTokens: await hasVoiceflowTokens() }),
       }),
     ],
   },

@@ -24,8 +24,17 @@ export const env = {
   vf: {
     mcpUrl: optional('VF_MCP_URL', 'https://mcp.voiceflow.com/mcp'),
     mcpToken: optional('VF_MCP_TOKEN'),
+    // Auth mode for the Voiceflow MCP: 'token' (static bearer, default) or 'oauth'
+    // (authorization-code + refresh via MCPOAuthClientProvider). OAuth points at
+    // whatever VF_MCP_URL resolves to, so set VF_MCP_URL to the staging MCP server
+    // when testing against staging.
+    authMode: optional('VF_AUTH_MODE', 'token'),
+    // Our OAuth callback (must be allow-listed / DCR-registered on the auth server).
+    oauthRedirectUrl: optional('OAUTH_REDIRECT_URL', 'https://copilot-mastra.vercel.app/oauth/callback'),
   },
 } as const;
 
 export const hasGlmKey = (): boolean => env.glm.apiKey.length > 0;
 export const hasVoiceflowToken = (): boolean => env.vf.mcpToken.length > 0;
+/** OAuth mode for the Voiceflow MCP (vs. the static bearer token). */
+export const useVoiceflowOAuth = (): boolean => env.vf.authMode.toLowerCase() === 'oauth';
