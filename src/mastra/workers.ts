@@ -2,6 +2,7 @@ import { Agent } from '@mastra/core/agent';
 import type { Workspace } from '@mastra/core/workspace';
 import type { Memory } from '@mastra/memory';
 import { loadMarkdownBody } from '../lib/loadPrompt';
+import { makeContextProcessors } from './memory';
 import { mainModel, triageModel } from './models';
 import { loadPromptingGuideTool } from '../tools/promptingGuide';
 import { diffPromptsTool } from '../tools/diffPrompts';
@@ -82,6 +83,8 @@ export function buildWorker(
     tools: { ...tools, ...(spec.localTools ?? {}) },
     workspace,
     memory,
+    // Token-budget the assembled context (window + recall + working memory) at every step.
+    inputProcessors: makeContextProcessors(),
     defaultOptions: {
       maxSteps: DEFAULT_MAX_STEPS,
       modelSettings: { maxOutputTokens: spec.maxTokens ?? DEFAULT_MAX_TOKENS },
@@ -111,6 +114,7 @@ export function buildOrchestrator(
     agents,
     workspace,
     memory,
+    inputProcessors: makeContextProcessors(),
     defaultOptions: {
       maxSteps: DEFAULT_MAX_STEPS,
       modelSettings: { maxOutputTokens: DEFAULT_MAX_TOKENS },

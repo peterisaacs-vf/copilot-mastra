@@ -5,6 +5,7 @@ import { loadMarkdownBody } from '../../lib/loadPrompt';
 import { extractJsonObject } from '../../lib/extractJson';
 import type { Workspace } from '@mastra/core/workspace';
 import type { Memory } from '@mastra/memory';
+import { makeContextProcessors } from '../memory';
 
 /**
  * Structured result of a single-transcript debug. Core fields
@@ -108,6 +109,7 @@ export function buildDebugAgent(
     tools,
     workspace,
     memory,
+    inputProcessors: makeContextProcessors(),
     defaultOptions: {
       maxSteps: DEBUG_MAX_STEPS,
       modelSettings: { maxOutputTokens: DEBUG_MAX_TOKENS },

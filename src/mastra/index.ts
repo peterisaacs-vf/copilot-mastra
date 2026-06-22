@@ -12,7 +12,7 @@ import { VercelDeployer } from '@mastra/deployer-vercel';
 import { registerApiRoute } from '@mastra/core/server';
 import { MastraEditor } from '@mastra/editor';
 import { getPostgresUrl, makePostgresStore, makeLibsqlStore, probePgvector } from './storage';
-import { pgMemory, localMemory } from './memory';
+import { pgMemory, localMemory, CONTEXT_TOKEN_BUDGET } from './memory';
 import { hasVoiceflowToken, hasGlmKey } from '../config/env';
 
 if (!hasGlmKey()) {
@@ -75,18 +75,19 @@ if (pgUrl) {
       lastMessages: 100,
       workingMemory: true,
       semanticRecall: vectorOk,
+      tokenBudget: CONTEXT_TOKEN_BUDGET,
     });
     console.info(`[storage] postgres ready; [memory] window(100)+workingMemory${vectorOk ? '+semanticRecall' : ' (no pgvector → recall off)'}`);
   } catch (e: any) {
     storage = makeLibsqlStore();
     memory = undefined;
-    Object.assign(storageDiag, { mode: 'libsql-fallback', memory: false, code: e?.code ?? null, error: redact(String(e?.message ?? e)) });
+    Object.assign(storageDiag, { mode: 'libsql-fallback', memory: false, code: e?.code ?? null, error: redact(String(e?.message ?? e)), tokenBudget: CONTEXT_TOKEN_BUDGET });
     console.error(`[pg-fail] ${e?.code ?? '?'} ${String(e?.message ?? e).slice(0, 110)} -> libsql fallback`);
   }
 } else {
   storage = makeLibsqlStore();
   memory = process.env.VERCEL ? undefined : localMemory();
-  Object.assign(storageDiag, { mode: 'libsql', pgUrlPresent: false, memory: Boolean(memory) });
+  Object.assign(storageDiag, { mode: 'libsql', pgUrlPresent: false, memory: Boolean(memory), tokenBudget: CONTEXT_TOKEN_BUDGET });
   console.info(`[storage] libsql; [memory] ${memory ? 'local' : 'off (set DATABASE_URL for durable memory)'}`);
 }
 

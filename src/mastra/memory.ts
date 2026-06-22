@@ -1,5 +1,6 @@
 import { Memory } from '@mastra/memory';
 import type { MastraStorage } from '@mastra/core/storage';
+import { TokenLimiterProcessor } from '@mastra/core/processors';
 import { PgVector } from '@mastra/pg';
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql';
 import { glmProvider } from './models';
@@ -11,12 +12,43 @@ const EMBED_MODEL = 'nomic-ai/nomic-embed-text-v1.5';
 /**
  * Verbatim recency window. NOTE: counts messages, not turns — one agentic step (tool
  * call + result + response) is several messages, so 100 messages ≈ a few dozen turns.
- * Set generous; semantic recall reaches back across ALL history (resource-scoped) so
- * total memory isn't capped at this window, and working memory holds durable facts on
- * top. If large tool-result messages strain the context window, prefer adding a token-
- * budget processor over shrinking this.
+ * This is just the message-count ceiling on what's *fetched* from history; the real
+ * context-size guard is the token budget below (CONTEXT_TOKEN_BUDGET), which trims the
+ * assembled context — window + recall + working memory — to a token ceiling at every step.
+ * Semantic recall still reaches back across ALL history (resource-scoped) and working
+ * memory holds durable facts, so total memory isn't capped at this window.
  */
 const LAST_MESSAGES = 100;
+
+/**
+ * Token budget for the assembled input context (system + history + recalled + working
+ * memory), enforced at EVERY agentic step by a TokenLimiterProcessor on each agent.
+ *
+ * This is our "compaction": Mastra's memory processors first assemble the context
+ * (lastMessages window + semantic recall + working memory), THEN this trims the total
+ * to a token ceiling — preserving system messages, prioritizing recent turns, and keeping
+ * a contiguous suffix (no gaps). It also bounds per-step growth when tool results pile up
+ * across a multi-step loop, so context can't blow the model window mid-task.
+ *
+ * Sizing: Claude Code compacts at ~150K on a ≥1M window (a deliberate fraction, not the
+ * whole window). Our Fireworks-served models (GLM-5.2 / DeepSeek-V4-Flash) windows are not
+ * yet confirmed; 96K is safe for a ≥128K window and leaves headroom for output (~8K) plus
+ * system + tool schemas. Tunable via MEMORY_TOKEN_BUDGET — raise once the real window is
+ * confirmed; lower if the triage (DeepSeek) window turns out smaller. Counting uses
+ * model-agnostic estimation (tokenx), which is fine for a budget cap.
+ */
+export const CONTEXT_TOKEN_BUDGET = Number(process.env.MEMORY_TOKEN_BUDGET ?? 96_000);
+
+/**
+ * Shared agent input processors. A single token-budget ceiling on the assembled context,
+ * attached to EVERY agent (independent of durable memory — it also bounds per-step tool
+ * growth). `contiguous` keeps an unbroken suffix of recent turns rather than a gappy
+ * best-fit, which reads better for a conversational copilot. Optional `limit` override
+ * lets a smaller-window tier (e.g. triage) get a tighter cap later without restructuring.
+ */
+export function makeContextProcessors(limit: number = CONTEXT_TOKEN_BUDGET) {
+  return [new TokenLimiterProcessor({ limit, trimMode: 'contiguous' })];
+}
 
 /** Relevant older messages pulled back by similarity (resource-scoped → spans the whole swarm + past sessions). */
 const SEMANTIC_RECALL = { topK: 5, messageRange: 3, scope: 'resource' as const };
