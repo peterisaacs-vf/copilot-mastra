@@ -30,7 +30,7 @@ export function getPostgresUrl(): string | undefined {
 export const hasPostgres = (): boolean => Boolean(getPostgresUrl());
 
 export function makePostgresStore(url: string): PostgresStore {
-  return new PostgresStore({ connectionString: url, ssl: PG_SSL, max: 3 });
+  return new PostgresStore({ id: 'copilot', connectionString: url, ssl: PG_SSL, max: 3 });
 }
 
 export function makeLibsqlStore(): LibSQLStore {
