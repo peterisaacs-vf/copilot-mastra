@@ -31,6 +31,11 @@ export const env = {
     authMode: optional('VF_AUTH_MODE', 'token'),
     // Our OAuth callback (must be allow-listed / DCR-registered on the auth server).
     oauthRedirectUrl: optional('OAUTH_REDIRECT_URL', 'https://copilot-mastra.vercel.app/oauth/callback'),
+    // Pre-registered OAuth client. If set, the provider SKIPS dynamic client
+    // registration (use this when the server's DCR endpoint isn't available). It's a
+    // public client, so a secret is normally not needed.
+    oauthClientId: optional('VF_OAUTH_CLIENT_ID'),
+    oauthClientSecret: optional('VF_OAUTH_CLIENT_SECRET'),
   },
 } as const;
 

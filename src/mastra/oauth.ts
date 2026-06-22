@@ -54,9 +54,19 @@ function storage(): OAuthStorage {
 export function makeVoiceflowOAuthProvider(
   onRedirect?: (url: URL) => void,
 ): MCPOAuthClientProvider {
+  // If a client_id is configured, pass it as pre-registered client info — this makes the
+  // provider SKIP dynamic client registration (needed while the server's DCR endpoint is
+  // unavailable). Public client, so the secret is usually absent.
+  const clientInformation = env.vf.oauthClientId
+    ? {
+        client_id: env.vf.oauthClientId,
+        ...(env.vf.oauthClientSecret ? { client_secret: env.vf.oauthClientSecret } : {}),
+      }
+    : undefined;
   return new MCPOAuthClientProvider({
     redirectUrl: env.vf.oauthRedirectUrl,
     clientMetadata: CLIENT_METADATA,
+    clientInformation,
     storage: storage(),
     onRedirectToAuthorization:
       onRedirect ?? ((url) => console.info(`[vf-oauth] authorize at: ${url.toString()}`)),
