@@ -1,18 +1,13 @@
 ---
 name: voiceflow-overview
 description: >
-  Deeper catalog reference for the Voiceflow plugin — the agents list,
-  raw MCP tool names, intent → skill routing table, and pre-flight
-  methodology. A baseline routing primer is already injected at session
-  start by the SessionStart hook; this skill is the fuller reference
-  for cases where the model needs the agents catalog, the raw MCP
-  tool list, or the methodology rationale behind the routing.
-  TRIGGER when: the user asks "what agents are there", "what MCP tools
-  do you have", or wants to understand which subagent does what; OR
-  the model is mid-task and needs to cross-reference an agent or a
-  raw tool name not covered by the routing primer; OR the user asks
-  "what can you do" / "where do I start" / "I have a Voiceflow project"
-  and the session-start primer is not present.
+  The capability catalog and routing reference for the Voiceflow plugin: the list of
+  skills, specialized subagents, and MCP tools, which to use for a given intent, and
+  the pre-flight methodology. TRIGGER when the user asks "what can you do / what can
+  you help with / what agents or tools are there", or when you need to look up which
+  skill, subagent, or MCP tool handles a task. This is the catalog — to *begin* a
+  session (resolve the project + frame the work) use `start`; to *print* the menu for
+  the user use `help`.
 version: 0.2.0
 ---
 

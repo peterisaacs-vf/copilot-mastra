@@ -1,6 +1,12 @@
 ---
 name: start
-description: Get started with the Voiceflow plugin — lists your projects and routes you to the right capability.
+description: >
+  Begin a working session: resolve the user's Voiceflow project and working
+  environment, then ask what they want to do and hand off. TRIGGER only on a
+  new/empty session or a greeting with no concrete task ("hi", "let's start",
+  "help me get oriented"). Do NOT load when the user names a task — build, edit,
+  debug, test/stress-test, optimize, audit, KB, wiring, voice — those route to
+  their own skill. For "what can you do / which skills exist" use `voiceflow-overview`.
 ---
 
 You are starting a new Voiceflow Copilot session.
