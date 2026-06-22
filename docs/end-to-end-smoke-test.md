@@ -117,6 +117,25 @@ across the steps.
 
 ---
 
+## OAuth flow (when staging is ready)
+
+The bearer token works today; OAuth (auth-code + refresh) is built and deployed but
+**off by default** (`VF_AUTH_MODE` unset → `token`). Server discovery is confirmed:
+`auth-api.voiceflow.com`, scopes `universal.workspace.read/.write`, public client + PKCE,
+DCR + discovery enabled. Our callback is live at `https://copilot-mastra.vercel.app/oauth/callback`.
+
+To test against Ben's staging:
+1. Get the **staging MCP server URL** from Ben (discovery resolves the staging auth server from it).
+2. Redeploy with `-e VF_AUTH_MODE=oauth -e VF_MCP_URL=<staging-mcp-url>` (callback stays the prod URL Ben allow-listed).
+3. In a browser, visit `https://copilot-mastra.vercel.app/oauth/start` → it redirects to Voiceflow → **consent once** → back to `/oauth/callback` (success page). Tokens persist in Postgres (`oauth_kv` table).
+4. `curl /oauth/status` → `{"mode":"oauth","hasTokens":true}`.
+5. Force a cold start (redeploy or wait) so agents pick up the tools → `curl /_diag/mcp` → `tools > 0`.
+6. Revert to `token` mode (or prod `VF_MCP_URL`) when done.
+
+Notes: tokens auto-refresh after the one-time consent (no re-consent). `OAuth start failed`
+on `/oauth/start` usually means discovery/DCR rejected our `redirect_uri` — ping Ben to confirm
+it's allow-listed on the env you pointed `VF_MCP_URL` at.
+
 ## Kill switches / rollback
 
 | Symptom | Lever |
