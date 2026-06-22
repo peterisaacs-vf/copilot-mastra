@@ -23,12 +23,19 @@ if (!hasGlmKey()) {
 }
 
 // Voiceflow MCP tools — graceful no-token fallback so Studio still boots.
+// mcpDiag is surfaced via GET /_diag/mcp so we can confirm the MCP is wired
+// (token present + tools loaded) with a single curl instead of reading logs.
 let vfTools: Record<string, any> = {};
+const mcpDiag: Record<string, unknown> = { tokenPresent: hasVoiceflowToken(), tools: 0 };
 if (hasVoiceflowToken()) {
   try {
     vfTools = await getVoiceflowTools();
-    console.info(`[voiceflow-mcp] loaded ${Object.keys(vfTools).length} tools`);
+    const names = Object.keys(vfTools);
+    mcpDiag.tools = names.length;
+    mcpDiag.names = names.slice(0, 40);
+    console.info(`[voiceflow-mcp] loaded ${names.length} tools`);
   } catch (err) {
+    mcpDiag.error = (err as Error).message;
     console.warn('[voiceflow-mcp] failed to load tools:', (err as Error).message);
   }
 } else {
@@ -119,6 +126,11 @@ export const mastra = new Mastra({
       registerApiRoute('/_diag/storage', {
         method: 'GET',
         handler: async (c) => c.json(storageDiag),
+      }),
+      // Confirms the Voiceflow MCP is wired: token present + how many tools loaded.
+      registerApiRoute('/_diag/mcp', {
+        method: 'GET',
+        handler: async (c) => c.json(mcpDiag),
       }),
     ],
   },
