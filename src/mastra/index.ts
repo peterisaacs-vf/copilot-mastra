@@ -13,6 +13,7 @@ import { registerApiRoute } from '@mastra/core/server';
 import { MastraEditor } from '@mastra/editor';
 import { getPostgresUrl, makePostgresStore, makeLibsqlStore, probePgvector } from './storage';
 import { pgMemory, localMemory, CONTEXT_TOKEN_BUDGET, OBSERVATIONAL_MEMORY } from './memory';
+import { skillRoutingScorer } from './scorers/skillRouting';
 import { hasVoiceflowToken, hasGlmKey, useVoiceflowOAuth } from '../config/env';
 import { beginVoiceflowAuthorization, completeVoiceflowAuthorization, hasVoiceflowTokens } from './oauth';
 
@@ -132,6 +133,9 @@ export const mastra = new Mastra({
     'analyze-transcripts': analyzeTranscriptsWorkflow,
     'prompt-optimizer': promptOptimizerWorkflow,
   },
+  // Eval scorers (Mastra eval suite). skill-routing is a golden-set regression scorer,
+  // driven offline by src/scripts/runRoutingEval.ts and visible in Studio.
+  scorers: { 'skill-routing': skillRoutingScorer },
   // Durable store chosen above: Postgres (Neon) when reachable, else LibSQL.
   // Backs workflow runs, memory threads, and the editor.
   storage,
