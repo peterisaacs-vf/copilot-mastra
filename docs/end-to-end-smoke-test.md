@@ -118,6 +118,52 @@ across the steps.
 
 ---
 
+## Eval → Studio (Datasets / Experiments)
+
+Goal: routing-eval history shows up in **Studio → Datasets → Experiments** instead of only in
+script stdout (closes the "eval runs aren't in Studio" gap). Built on Mastra's Datasets +
+Experiments + the `skill-routing` scorer.
+
+**Already wired (live now):** dataset **`skill-routing-golden`** (29 items) exists in the
+deployed Studio's **Datasets** tab. Source of truth = `src/mastra/scorers/routingDataset.ts`.
+
+**Two scripts:**
+- `src/scripts/wireRoutingExperiment.ts` — REST, **needs no local secrets**. Find-or-creates
+  the dataset on a deployed app and syncs items (idempotent). Run:
+  `npx tsx src/scripts/wireRoutingExperiment.ts [--url https://copilot-mastra.vercel.app]`
+- `src/scripts/runRoutingExperiment.ts` — the **executor** (SDK). Runs the experiment and
+  persists to whatever storage *the process* uses:
+  - **Lands in deployed Studio:** `DATABASE_URL='<neon-url>' GLM_API_KEY='<valid>' npx tsx src/scripts/runRoutingExperiment.ts`
+  - **Dry run (local libsql, won't reach Studio):** `GLM_API_KEY='<valid>' npx tsx src/scripts/runRoutingExperiment.ts`
+
+**To fire it (lands in deployed Studio):**
+1. Get the **Neon URL** (Vercel project env `DATABASE_URL`, or the Neon dashboard).
+2. `DATABASE_URL='<neon>' GLM_API_KEY='<valid-fireworks-key>' npx tsx src/scripts/runRoutingExperiment.ts`
+3. Open `$BASE/` → **Datasets → skill-routing-golden → Experiments**.
+
+**Three findings that shaped this (so we don't re-learn them):**
+1. **`mastra api experiment run` does NOT work against the Vercel deploy.** The runner starts
+   the experiment in a background task *after* sending its HTTP response, and Vercel freezes
+   the function once the response is sent — so the run never executes (it lands as `failed`
+   with `startedAt: null`). Dataset create + item sync over REST/CLI *do* work. Experiment
+   **execution** needs a persistent process: the executor script, or a non-serverless Mastra
+   server pointed at Neon. (This is the real reason the executor runs locally/elsewhere.)
+2. **Thread-scoped Observational Memory needs a threadId per call**, and the REST experiment
+   runner (`targetType:'agent'`) doesn't inject one per item. The executor sidesteps this by
+   running with **memory off** (`MEMORY_DISABLED=1`, set automatically) — routing doesn't use
+   memory, so behavior is unaffected.
+3. **Mastra storage bug:** a dataset's `scorerIds` is stored/returned as a JSON *string*, and
+   `runExperiment` does `[...datasetScorerIds]`, spreading it into characters →
+   `Scorer with id [ not found`. **Workaround:** don't set `scorerIds` on the dataset record;
+   pass the scorer in the experiment-run body / `startExperiment({ scorers })`. (The prod
+   dataset's `scorerIds` was already PATCHed to `null`.)
+
+> ⚠️ The executor runs the orchestrator **locally**, so it needs a valid `GLM_API_KEY` in the
+> local env. The `.env` key was **stale (401)** this session — set a working Fireworks key
+> before running. (`DATABASE_URL` only needs to point at Neon to land results in Studio.)
+
+---
+
 ## OAuth flow (when staging is ready)
 
 The bearer token works today; OAuth (auth-code + refresh) is built and deployed but

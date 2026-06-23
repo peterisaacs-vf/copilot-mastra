@@ -19,7 +19,9 @@
     "smoke:analyze": "tsx src/scripts/analyzeSmoke.ts",
     "smoke:optimize": "tsx src/scripts/optimizeSmoke.ts",
     "test:parse": "tsx src/scripts/testParse.ts",
-    "audit:wiring": "tsx src/scripts/wiringAudit.ts"
+    "audit:wiring": "tsx src/scripts/wiringAudit.ts",
+    "eval:wire": "tsx src/scripts/wireRoutingExperiment.ts",
+    "eval:run": "tsx src/scripts/runRoutingExperiment.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "1.0.41",
