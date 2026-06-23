@@ -71,6 +71,21 @@ export function makeVoiceflowOAuthProvider(
     onRedirectToAuthorization:
       onRedirect ?? ((url) => console.info(`[vf-oauth] authorize at: ${url.toString()}`)),
   });
+  // RFC 8707 resource indicator. The MCP SDK's selectResourceURL() OMITS `resource`
+  // entirely when no Protected Resource Metadata (PRM) was fetched AND the provider has no
+  // validateResourceURL() method — which is exactly our override case: we skip MCP discovery
+  // (the MCP server may be down / not advertise its auth server), so PRM is never loaded.
+  // Some authorization servers (e.g. the review env) then reject /authorize with HTTP 422
+  // ("resource: expected string, received undefined"). Implementing validateResourceURL()
+  // makes the SDK include `resource` consistently in the authorize, token-exchange, and
+  // refresh requests. We prefer the server-advertised resource when PRM is present (so the
+  // production discovery path is unchanged) and otherwise fall back to the canonical MCP URL.
+  (
+    provider as unknown as {
+      validateResourceURL: (defaultResource: URL, metadataResource?: string) => Promise<URL>;
+    }
+  ).validateResourceURL = async (defaultResource, metadataResource) =>
+    metadataResource ? new URL(metadataResource) : defaultResource;
   // Authorization-server override (VF_OAUTH_AUTH_SERVER). MCPOAuthClientProvider doesn't
   // implement discoveryState(), so auth() rediscovers the auth server from the MCP server on
   // every call. Supplying discoveryState() with an authorizationServerUrl makes auth() SKIP
