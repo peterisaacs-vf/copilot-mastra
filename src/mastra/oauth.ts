@@ -63,7 +63,7 @@ export function makeVoiceflowOAuthProvider(
         ...(env.vf.oauthClientSecret ? { client_secret: env.vf.oauthClientSecret } : {}),
       }
     : undefined;
-  return new MCPOAuthClientProvider({
+  const provider = new MCPOAuthClientProvider({
     redirectUrl: env.vf.oauthRedirectUrl,
     clientMetadata: CLIENT_METADATA,
     clientInformation,
@@ -71,6 +71,18 @@ export function makeVoiceflowOAuthProvider(
     onRedirectToAuthorization:
       onRedirect ?? ((url) => console.info(`[vf-oauth] authorize at: ${url.toString()}`)),
   });
+  // Authorization-server override (VF_OAUTH_AUTH_SERVER). MCPOAuthClientProvider doesn't
+  // implement discoveryState(), so auth() rediscovers the auth server from the MCP server on
+  // every call. Supplying discoveryState() with an authorizationServerUrl makes auth() SKIP
+  // that discovery and use this server instead — it still fetches the server's OAuth
+  // endpoints from its RFC 8414 discovery doc. Used to authenticate against a review/staging
+  // auth server whose MCP doesn't (yet) advertise it.
+  if (env.vf.oauthAuthServer) {
+    (provider as unknown as { discoveryState: () => { authorizationServerUrl: string } }).discoveryState =
+      () => ({ authorizationServerUrl: env.vf.oauthAuthServer });
+    console.info(`[vf-oauth] authorization server overridden -> ${env.vf.oauthAuthServer}`);
+  }
+  return provider;
 }
 
 /**

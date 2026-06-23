@@ -40,6 +40,12 @@ export const env = {
     // public client, so a secret is normally not needed.
     oauthClientId: optional('VF_OAUTH_CLIENT_ID'),
     oauthClientSecret: optional('VF_OAUTH_CLIENT_SECRET'),
+    // Override the OAuth authorization server, skipping discovery from the MCP server. Use
+    // when the MCP server advertises a different / unreachable auth server than the one you
+    // want to authenticate against (e.g. a review env whose MCP isn't wired to its auth
+    // server yet). When set, the provider forces this as the authorization server and still
+    // fetches its OAuth endpoints via this server's RFC 8414 discovery doc.
+    oauthAuthServer: optional('VF_OAUTH_AUTH_SERVER'),
   },
 } as const;
 

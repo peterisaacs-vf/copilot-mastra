@@ -15,7 +15,7 @@ import { getPostgresUrl, makePostgresStore, makeLibsqlStore, probePgvector } fro
 import { pgMemory, localMemory, CONTEXT_TOKEN_BUDGET, OBSERVATIONAL_MEMORY } from './memory';
 import { skillRoutingScorer } from './scorers/skillRouting';
 import { skillRoutingJudgeScorer } from './scorers/skillRoutingJudge';
-import { hasVoiceflowToken, hasGlmKey, useVoiceflowOAuth } from '../config/env';
+import { hasVoiceflowToken, hasGlmKey, useVoiceflowOAuth, env } from '../config/env';
 import { beginVoiceflowAuthorization, completeVoiceflowAuthorization, hasVoiceflowTokens } from './oauth';
 
 if (!hasGlmKey()) {
@@ -195,7 +195,12 @@ export const mastra = new Mastra({
       registerApiRoute('/oauth/status', {
         method: 'GET',
         handler: async (c) =>
-          c.json({ mode: useVoiceflowOAuth() ? 'oauth' : 'token', hasTokens: await hasVoiceflowTokens() }),
+          c.json({
+            mode: useVoiceflowOAuth() ? 'oauth' : 'token',
+            hasTokens: await hasVoiceflowTokens(),
+            mcpUrl: env.vf.mcpUrl,
+            authServer: env.vf.oauthAuthServer || '(discovered from MCP server)',
+          }),
       }),
     ],
   },
