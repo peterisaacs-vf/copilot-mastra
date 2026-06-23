@@ -1,6 +1,10 @@
 ---
 name: projects
-description: List Voiceflow projects in a workspace
+description: >
+  List the user's Voiceflow projects in a workspace (fast read-only utility). TRIGGER
+  ONLY when the user explicitly asks to list / see / pick / switch projects, or to
+  resolve which project to work on. Do NOT load for build, debug, test, KB, prompt,
+  wiring, voice, optimize, or any other task — those route to their own skills.
 ---
 
 Quick read-only utility — list the user's Voiceflow projects.
