@@ -18,7 +18,8 @@
     "smoke:debug": "tsx src/scripts/debugSmoke.ts",
     "smoke:analyze": "tsx src/scripts/analyzeSmoke.ts",
     "smoke:optimize": "tsx src/scripts/optimizeSmoke.ts",
-    "test:parse": "tsx src/scripts/testParse.ts"
+    "test:parse": "tsx src/scripts/testParse.ts",
+    "audit:wiring": "tsx src/scripts/wiringAudit.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "1.0.41",

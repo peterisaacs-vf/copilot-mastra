@@ -107,6 +107,14 @@ if (pgUrl) {
   console.info(`[storage] libsql; [memory] ${memory ? 'local' : 'off (set DATABASE_URL for durable memory)'}`);
 }
 
+// Test/eval escape hatch: run agents with NO memory, so dev scripts can call
+// generate() without a thread/resource (resource-scoped working memory + thread-scoped
+// OM otherwise require them). Irrelevant to routing/perf, which is what evals measure.
+if (process.env.MEMORY_DISABLED) {
+  memory = undefined;
+  console.warn('[memory] disabled (MEMORY_DISABLED)');
+}
+
 // Workers (debug has its own structured-output helper; the rest come from specs).
 const workers: Record<string, Agent> = {
   'debug-agent': buildDebugAgent(vfTools, workspace, memory),
