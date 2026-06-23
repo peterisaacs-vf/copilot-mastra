@@ -5,7 +5,8 @@ description: >
   agents. Covers eval types, test case design, calibration, and result tracking.
   TRIGGER when: user asks to set up evals, write test cases, design
   evaluation criteria, calibrate eval pass thresholds, run a test suite,
-  benchmark agent quality, or "test the agent end-to-end". Also when the
+  stress-test the agent with adversarial or tricky scenarios, benchmark
+  agent quality, or "test the agent end-to-end". Also when the
   user asks how to verify a change before shipping.
 version: 0.2.0
 ---

@@ -235,7 +235,7 @@ function runAudit(data: VFExport): Findings {
       // PHASE 5: malformed functionInputVariableID
       const fivid = cfg.functionInputVariableID;
       if (fivid) {
-        const allInputIds = new Set(funcInputById.keys().map((k) => k.split('::')[1]));
+        const allInputIds = new Set([...funcInputById.keys()].map((k) => k.split('::')[1]));
         if (funcInputByName.has(`${fid}::${fivid}`) && !allInputIds.has(fivid)) {
           if (!(fivid.startsWith('69') && fivid.length >= 24)) {
             findings.phase5_malformedWiring.push({

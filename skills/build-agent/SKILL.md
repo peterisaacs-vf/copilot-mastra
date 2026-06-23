@@ -5,7 +5,8 @@ description: >
   prompt engineering, tool design, function code, knowledge base strategy,
   multi-agent swarms, and channel-specific patterns (voice and chat).
   TRIGGER when: user asks to build a new agent, design an agent from scratch,
-  or do a full agent build with multiple components.
+  do a full agent build with multiple components, or add/create/configure an
+  individual playbook or workflow.
 version: 0.1.0
 ---
 

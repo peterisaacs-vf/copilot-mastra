@@ -46,7 +46,7 @@ const CASES: Case[] = [
   { u: 'Should I use one big agent or split it into multiple playbooks?', expect: ['agent-architecture'] },
   // --- generic / routing ---
   { u: 'What can you help me with?', expect: ['voiceflow-overview'] },
-  { u: 'Where do I start?', expect: ['voiceflow-overview'], note: '`start` is not in the orchestrator catalog' },
+  { u: 'Where do I start?', expect: ['start', 'voiceflow-overview'], note: 'either: start (begin session) or overview (catalog)' },
   // --- intentionally ambiguous (exploratory: any sensible pull is fine) ---
   { u: 'My agent is slow and users are dropping off.', expect: ['audit-wiring', 'debug', 'agent-architecture', 'test'], note: 'ambiguous' },
   { u: 'Make my agent better.', expect: ['voiceflow-overview', 'prompt-optimizer', 'build-agent', 'audit-wiring'], note: 'ambiguous' },
@@ -101,7 +101,7 @@ console.log('-'.repeat(104));
 for (const r of results) {
   const loaded = r.skills.length ? r.skills.join(',') : (r.ok ? '(none)' : 'ERR');
   const mark = r.note?.includes('ambiguous') ? (r.skills.length ? '~' : '·') : r.hit ? '✓' : '✗';
-  console.log(pad(r.u, 52) + pad(r.expect.join('|'), 22) + pad(loaded, 22) + mark);
+  console.log(pad(r.u, 52) + pad(r.expect.join('|'), 22) + pad(loaded, 22) + mark + '  ' + String(r.ms).padStart(6) + 'ms');
 }
 
 const scored = results.filter((r) => !r.note?.includes('ambiguous'));
