@@ -207,6 +207,6 @@ export const mastra = new Mastra({
   // (Hobby 60s / Pro 300s) — agent runs are long, so give them as long as allowed.
   deployer: new VercelDeployer({
     studio: true,
-    maxDuration: Number(process.env.VERCEL_FN_MAX_DURATION ?? 60),
+    maxDuration: Number(process.env.VERCEL_FN_MAX_DURATION ?? 300),
   }),
 });
