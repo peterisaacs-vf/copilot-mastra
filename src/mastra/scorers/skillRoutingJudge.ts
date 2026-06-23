@@ -1,5 +1,5 @@
 import { createScorer } from '@mastra/core/evals';
-import { triageModel } from '../models';
+import { judgeModel } from '../models';
 import { extractLoadedSkills } from './skillRouting';
 
 /**
@@ -19,7 +19,7 @@ export const skillRoutingJudgeScorer = createScorer({
     'LLM-judged routing quality for live runs (no ground truth): was the loaded skill appropriate for the user request?',
   type: 'agent',
   judge: {
-    model: triageModel,
+    model: judgeModel,
     instructions:
       'You evaluate a Voiceflow copilot router. Given a user message and which skill(s) the ' +
       'router loaded, judge whether the choice is appropriate. Be lenient when the message is ' +

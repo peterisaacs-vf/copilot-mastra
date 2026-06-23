@@ -20,6 +20,10 @@ export const env = {
     // emits clean structured JSON (validated in the model bake-off). Used by the
     // mechanical workers (audit-kb / setup-evals / test-runner). Override via env.
     modelTriage: optional('GLM_MODEL_TRIAGE', 'accounts/fireworks/models/deepseek-v4-flash'),
+    // Eval JUDGE tier — deliberately a NEUTRAL family (not GLM/DeepSeek) to avoid
+    // self-preference bias. Kimi K2.6 (Moonshot) benchmarked on par with Claude's
+    // reference verdicts on routing judgments. Override via GLM_MODEL_JUDGE.
+    modelJudge: optional('GLM_MODEL_JUDGE', 'accounts/fireworks/models/kimi-k2p6'),
   },
   vf: {
     mcpUrl: optional('VF_MCP_URL', 'https://mcp.voiceflow.com/mcp'),
