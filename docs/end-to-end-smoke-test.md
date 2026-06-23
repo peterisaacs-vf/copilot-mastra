@@ -43,6 +43,7 @@ vercel deploy --prebuilt --prod --archive=tgz \
   --token "$(cat scratchpad/.vctoken)" \
   -e GLM_API_KEY="$GLM_API_KEY" \
   -e VF_MCP_TOKEN="$VF_MCP_TOKEN" \
+  -e MASTRA_TELEMETRY_DISABLED=1 \
   --yes
 ```
 
