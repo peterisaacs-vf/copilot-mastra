@@ -84,8 +84,13 @@ export function makeVoiceflowOAuthProvider(
     provider as unknown as {
       validateResourceURL: (defaultResource: URL, metadataResource?: string) => Promise<URL>;
     }
-  ).validateResourceURL = async (defaultResource, metadataResource) =>
-    metadataResource ? new URL(metadataResource) : defaultResource;
+  ).validateResourceURL = async (defaultResource, metadataResource) => {
+    // Explicit override wins (VF_OAUTH_RESOURCE) — needed when the auth server expects a
+    // registered resource that differs from the MCP URL we connect to.
+    if (env.vf.oauthResource) return new URL(env.vf.oauthResource);
+    // Otherwise prefer the server-advertised resource (PRM) and fall back to the canonical MCP URL.
+    return metadataResource ? new URL(metadataResource) : defaultResource;
+  };
   // Authorization-server override (VF_OAUTH_AUTH_SERVER). MCPOAuthClientProvider doesn't
   // implement discoveryState(), so auth() rediscovers the auth server from the MCP server on
   // every call. Supplying discoveryState() with an authorizationServerUrl makes auth() SKIP
