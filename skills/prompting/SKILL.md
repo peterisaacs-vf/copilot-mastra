@@ -15,9 +15,9 @@ version: 0.1.0
 
 ### Global Prompt
 
-Carries across ALL playbooks. Every LLM call sees this.
+Carries across ALL playbooks. Every LLM call sees this. It's a **single field** — write the persona sections and the guardrail sections together (there is no separate "guidelines" field).
 
-**Persona field** — pack four sections in:
+**Persona sections** — pack these four in:
 
 `<identity>` — WHO the agent IS and IS NOT:
 ```xml
@@ -61,7 +61,7 @@ RIGHT: [just answer the question]
 </formatting>
 ```
 
-**Guidelines field** — operational rules across ALL playbooks:
+**Guardrail sections** — operational rules across ALL playbooks (same field, after the persona sections):
 - `<terminology>` — Brand names, forbidden words
 - `<escalation>` — When and how to hand off
 - `<silent_execution>` — Never expose tool calls or reasoning
@@ -69,7 +69,7 @@ RIGHT: [just answer the question]
 
 Models pay extra attention to content under `# Guardrails`.
 
-Keep concise (100-300 words per field). If removing a sentence only
+Keep concise (100-300 words per section). If removing a sentence only
 affects one use case, it doesn't belong in the global prompt.
 
 ### Main Agent Instructions

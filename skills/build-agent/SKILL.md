@@ -111,11 +111,11 @@ details on structure and anti-patterns.
 
 | Content Type | Where It Goes | Why |
 |-------------|---------------|-----|
-| Identity, role, name | Global Prompt > Persona | Applies everywhere |
-| Primary objective | Global Prompt > Goal | Anchors all decisions |
-| Communication style | Global Prompt > Tone | Consistent across playbooks |
-| Safety rules | Global Prompt > Guidelines | Non-negotiable everywhere |
-| Routing logic | Global Agent > Instructions | Only the router needs this |
+| Identity, role, name | Global Prompt | Applies everywhere |
+| Primary objective | Global Prompt | Anchors all decisions |
+| Communication style | Global Prompt | Consistent across playbooks |
+| Safety rules | Global Prompt | Non-negotiable everywhere |
+| Routing logic | Main Agent Instructions | Only the router needs this |
 | Task procedures | Playbook > Instructions | Only this playbook needs this |
 | Reference data | KB or Playbook Instructions | Depends on size and reuse |
 
