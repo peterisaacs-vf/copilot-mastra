@@ -92,19 +92,19 @@ Apply the **playbook test**:
 **Create a playbook ONLY when:**
 - The task has a distinct multi-step flow (booking, ordering, onboarding)
 - The task needs functions or API tools
-- The task has its own rules that would clutter the operator prompt
+- The task has its own rules that would clutter the main agent instructions
 
-**Keep on the operator when:**
-- The task is answering questions (use KB on the operator)
+**Keep in the main agent when:**
+- The task is answering questions (use KB on the main agent)
 - The task has no tools beyond KB/web search
 - Creating a playbook would just be a thin wrapper around a KB query
 
 **The test:** If a playbook's only tool would be the Knowledge Base,
-it should NOT be a playbook. The operator handles Q&A directly.
+it should NOT be a playbook. The main agent handles Q&A directly.
 
 Present a concise architecture plan:
-- Agent pattern (single agent vs operator + playbooks)
-- What the operator handles directly (with KB)
+- Agent pattern (single agent vs main agent + playbooks)
+- What the main agent handles directly (with KB)
 - Which playbooks are needed and why
 - Functions needed
 - KB documents needed
@@ -119,7 +119,7 @@ defines the prompt structure you MUST follow — do not write from memory.
 
 The global prompt is prepended to EVERY playbook call. Identity, tone,
 and formatting rules set here are inherited everywhere. Never repeat
-them in operator instructions or playbook instructions.
+them in main agent instructions or playbook instructions.
 
 **Show the user the full prompt text** for each component before applying.
 Don't just show a summary — show the actual prompt they'll be deploying.

@@ -48,14 +48,14 @@ or needs an isolated context.
 | Skill | When to use |
 |---|---|
 | `build-agent` | Build, design, or scaffold a Voiceflow agent end-to-end |
-| `prompting` | Writing or editing a global prompt, operator instructions, or playbook prompt |
+| `prompting` | Writing or editing a global prompt, main agent instructions, or playbook prompt |
 | `prompt-optimizer` | Improving an existing prompt using real transcript data (scoring + reflection) |
 | `functions` | Writing or debugging Voiceflow function code (the JS that calls APIs) |
 | `wiring-architect` | Designing how data flows between functions, project variables, and agent tool defaults — captureResponse, shouldFulfill, defaultValue patterns |
 | `audit-wiring` | Running a structured audit of a project's wiring to find captureResponse gaps and malformed tool configs |
 | `knowledge-base` | KB design, document structure, chunking, retrieval optimization |
 | `voice` | Voice-specific patterns — STT/TTS, number formatting, voice guardrails |
-| `agent-architecture` | Multi-agent architecture — global prompt, operator, playbooks, routing |
+| `agent-architecture` | Multi-agent architecture — global prompt, main agent instructions, playbooks, routing |
 | `debug` | Debugging methodology for individual transcripts or systemic failure patterns |
 | `test` | Evaluation design, test case calibration, eval coverage |
 | `document` | Project wiki for non-code context — partner profile, business rules, integration notes |

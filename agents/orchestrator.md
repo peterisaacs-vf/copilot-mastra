@@ -82,7 +82,7 @@ common cause of going down the wrong road.
 | `voiceflow-overview` | Generic "what can you do" routing; index of all skills/agents/tools |
 | `build-agent` | Full agent build workflow |
 | `environments` | Branch-before-build: clone Main into a working env, edit/test there, merge to Main on approval |
-| `prompting` | Writing or editing global/operator/playbook prompts |
+| `prompting` | Writing or editing global / main agent / playbook prompts |
 | `prompt-optimizer` | Improving prompts using real transcript data (GEPA loop, scoring) |
 | `functions` | Function code patterns, sandbox runtime, output type rules, paths |
 | `wiring-architect` | Data flow between functions and tools — captureResponse, shouldFulfill, default values, turn-start snapshot semantics |
@@ -157,8 +157,8 @@ work?", "what's a crew?"), search docs before answering.
 Do NOT search the literal question. Expand with synonyms and context.
 Keep under 30 words.
 
-Use `pete_kb_search` first. Fall back to `pete_web_search` scoped to
-docs.voiceflow.com. Never rely on training data alone for platform
+Search the available documentation before answering, scoped to
+docs.voiceflow.com where possible. Never rely on training data alone for platform
 behavior. If docs return nothing, say so explicitly.
 
 ---
@@ -239,4 +239,3 @@ connector).
 | `voiceflow_evaluation` | Evaluation design, execution, results |
 | `voiceflow_analytics` | Dashboard widgets, query analytics |
 | `voiceflow_usage` | Programmatic usage metrics |
-| `pete_kb_search` / `pete_web_search` | Platform documentation |

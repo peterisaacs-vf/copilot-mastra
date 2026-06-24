@@ -57,17 +57,17 @@ Apply the **playbook test**:
 **Create a playbook ONLY when:**
 - Distinct multi-step flow (booking, ordering, onboarding)
 - Needs functions or API tools
-- Own rules that would clutter the operator prompt
+- Own rules that would clutter the main agent instructions
 
-**Keep on the operator when:**
-- Answering questions (use KB on the operator)
+**Keep in the main agent when:**
+- Answering questions (use KB on the main agent)
 - No tools beyond KB/web search
 - Would just be a thin wrapper around a KB query
 
 **The test:** If a playbook's only tool is the Knowledge Base, it
 should NOT be a playbook.
 
-Present: agent pattern, what the operator handles, which playbooks
+Present: agent pattern, what the main agent handles, which playbooks
 and why, functions needed, KB documents needed, crew routing logic.
 
 Get confirmation before writing any prompts.
@@ -265,12 +265,12 @@ SECURITY INSTRUCTIONS (HIGHEST PRIORITY):
 ## Related skills
 
 - **`environments`** — branch-before-build: edit in a cloned working environment, merge to Main on approval. Applies to every edit to an existing agent.
-- **`prompting`** — for global/operator/playbook prompt structure, XML tag conventions, tone rules.
+- **`prompting`** — for global / main agent / playbook prompt structure, XML tag conventions, tone rules.
 - **`functions`** — for the JS code patterns when you write function tools.
 - **`wiring-architect`** — for how function variables, project variables, captureResponse, and tool input defaults connect. Read this BEFORE creating any agent tool — most v4 build errors are wiring errors.
 - **`audit-wiring`** — run this on any project you didn't build yourself to find latent wiring gaps before designing on top.
 - **`knowledge-base`** — when the agent needs grounding from documents.
-- **`agent-architecture`** — for multi-agent setups, operator routing, and playbook architecture.
+- **`agent-architecture`** — for multi-agent setups, main agent routing, and playbook architecture.
 - **`voice`** — voice-specific patterns when the channel is voice.
 - **`prompt-optimizer`** — after deploy, when transcripts show systematic failures.
 - **`document`** — to set up the project wiki for non-code context.
