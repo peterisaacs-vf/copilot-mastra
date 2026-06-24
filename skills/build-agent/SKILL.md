@@ -67,6 +67,10 @@ Apply the **playbook test**:
 **The test:** If a playbook's only tool is the Knowledge Base, it
 should NOT be a playbook.
 
+Apply this test BEFORE naming playbooks anywhere — including a quick
+build overview or plan. Don't propose an FAQ/Q&A playbook and then
+retract it; KB-only Q&A always lives on the main agent.
+
 Present: agent pattern, what the main agent handles, which playbooks
 and why, functions needed, KB documents needed, crew routing logic.
 
