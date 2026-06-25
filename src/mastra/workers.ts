@@ -6,6 +6,7 @@ import { makeContextProcessors } from './memory';
 import { mainModel, triageModel } from './models';
 import { loadPromptingGuideTool } from '../tools/promptingGuide';
 import { diffPromptsTool } from '../tools/diffPrompts';
+import { resolveToolsArg, type ToolsArg } from './dynamicTools';
 
 export type Tier = 'main' | 'triage';
 
@@ -70,17 +71,20 @@ function instructionsFor(spec: { agentFile: string; skills: string[] }): string 
 /** Build a synchronous worker agent from its .md + model tier, with the shared skill workspace. */
 export function buildWorker(
   spec: WorkerSpec,
-  tools: Record<string, any> = {},
+  tools: ToolsArg = {},
   workspace?: Workspace,
   memory?: Memory,
 ): Agent {
+  // Resolve the Voiceflow MCP toolset per-request (lazy/self-healing) and merge in the
+  // worker's static local tools each time.
+  const vfTools = resolveToolsArg(tools);
   return new Agent({
     id: spec.id,
     name: spec.name,
     description: spec.description,
     instructions: instructionsFor(spec),
     model: TIER_MODEL[spec.tier],
-    tools: { ...tools, ...(spec.localTools ?? {}) },
+    tools: async (ctx: any) => ({ ...(await vfTools(ctx)), ...(spec.localTools ?? {}) }),
     workspace,
     memory,
     // Token-budget the assembled context (window + recall + working memory) at every step.
@@ -99,10 +103,11 @@ export function buildWorker(
  */
 export function buildOrchestrator(
   agents: Record<string, Agent>,
-  tools: Record<string, any> = {},
+  tools: ToolsArg = {},
   workspace?: Workspace,
   memory?: Memory,
 ): Agent {
+  const vfTools = resolveToolsArg(tools);
   return new Agent({
     id: 'orchestrator',
     name: 'orchestrator',
@@ -110,7 +115,7 @@ export function buildOrchestrator(
       'Voiceflow copilot supervisor. Routes requests to specialized workers (build, debug, review, audit-kb, setup-evals, test-runner).',
     instructions: loadMarkdownBody('agents/orchestrator.md'),
     model: mainModel,
-    tools,
+    tools: async (ctx: any) => ({ ...(await vfTools(ctx)) }),
     agents,
     workspace,
     memory,

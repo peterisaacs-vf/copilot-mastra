@@ -288,6 +288,14 @@ async function doRefresh(): Promise<string> {
   }
 }
 
+/** Drop the in-process token cache + any backoff (e.g. right after a fresh consent). */
+export function resetVoiceflowTokenCache(): void {
+  accessCache = undefined;
+  refreshInflight = undefined;
+  refreshCooldownUntil = 0;
+  lastRefreshError = undefined;
+}
+
 /** Get a currently-valid Voiceflow access token, refreshing if needed. */
 export async function getFreshVoiceflowAccessToken(force = false): Promise<string> {
   if (!force && accessCache && accessCache.expMs - Date.now() > 10_000) return accessCache.token;

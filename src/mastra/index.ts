@@ -16,7 +16,7 @@ import { pgMemory, localMemory, CONTEXT_TOKEN_BUDGET, OBSERVATIONAL_MEMORY } fro
 import { skillRoutingScorer } from './scorers/skillRouting';
 import { skillRoutingJudgeScorer } from './scorers/skillRoutingJudge';
 import { hasVoiceflowToken, hasGlmKey, useVoiceflowOAuth, env } from '../config/env';
-import { beginVoiceflowAuthorization, completeVoiceflowAuthorization, hasVoiceflowTokens, resetVoiceflowOAuth, probeVoiceflowMcp } from './oauth';
+import { beginVoiceflowAuthorization, completeVoiceflowAuthorization, hasVoiceflowTokens, resetVoiceflowOAuth, probeVoiceflowMcp, resetVoiceflowTokenCache } from './oauth';
 
 if (!hasGlmKey()) {
   console.warn(
@@ -28,34 +28,61 @@ if (!hasGlmKey()) {
 // Voiceflow MCP tools — graceful no-token fallback so Studio still boots.
 // mcpDiag is surfaced via GET /_diag/mcp so we can confirm the MCP is wired
 // (token present + tools loaded) with a single curl instead of reading logs.
-let vfTools: Record<string, any> = {};
+// Lazily-loaded, cached Voiceflow MCP toolset. Agents resolve their tools through
+// ensureVfTools() on EVERY request (Mastra DynamicArgument), so:
+//   - a cold-start connect failure (or a token that only becomes valid once the user
+//     consents at /oauth/start) self-heals on the next request — no redeploy needed;
+//   - once loaded, the cached toolset is returned instantly (the live MCP connection
+//     refreshes the short-lived token per request via the custom fetch).
+let vfToolsCache: Record<string, any> = {};
+let vfToolsLoaded = false;
+let vfLoadInflight: Promise<Record<string, any>> | undefined;
+let vfLoadCooldownUntil = 0;
 const mcpDiag: Record<string, unknown> = {
   authMode: useVoiceflowOAuth() ? 'oauth' : 'token',
   tokenPresent: hasVoiceflowToken(),
   tools: 0,
 };
-if (useVoiceflowOAuth() || hasVoiceflowToken()) {
-  // Retry the cold-start connect a couple times — the first connect mints a token and
-  // can race a concurrent refresh on another instance; a quick retry avoids booting
-  // the whole instance with 0 tools over a transient hiccup.
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      vfTools = await getVoiceflowTools();
-      const names = Object.keys(vfTools);
-      mcpDiag.tools = names.length;
-      mcpDiag.names = names.slice(0, 40);
-      delete mcpDiag.error;
-      console.info(`[voiceflow-mcp] loaded ${names.length} tools (${useVoiceflowOAuth() ? 'oauth' : 'token'}, attempt ${attempt})`);
-      if (names.length > 0) break;
-    } catch (err) {
-      mcpDiag.error = (err as Error).message;
-      console.warn(`[voiceflow-mcp] attempt ${attempt} failed to load tools:`, (err as Error).message);
-      if (useVoiceflowOAuth()) {
-        console.warn('[voiceflow-mcp] OAuth mode: if not yet authorized, visit /oauth/start once to consent.');
+
+async function ensureVfTools(): Promise<Record<string, any>> {
+  if (vfToolsLoaded) return vfToolsCache;
+  if (!(useVoiceflowOAuth() || hasVoiceflowToken())) return vfToolsCache;
+  if (Date.now() < vfLoadCooldownUntil) return vfToolsCache;
+  if (!vfLoadInflight) {
+    vfLoadInflight = (async () => {
+      try {
+        const t = await getVoiceflowTools();
+        const names = Object.keys(t);
+        if (names.length > 0) {
+          vfToolsCache = t;
+          vfToolsLoaded = true;
+          mcpDiag.tools = names.length;
+          mcpDiag.names = names.slice(0, 40);
+          delete mcpDiag.error;
+          console.info(`[voiceflow-mcp] loaded ${names.length} tools (${useVoiceflowOAuth() ? 'oauth' : 'token'})`);
+        } else {
+          // Connect failed silently inside the MCP client (returns {}). Back off briefly.
+          vfLoadCooldownUntil = Date.now() + 15_000;
+          console.warn('[voiceflow-mcp] 0 tools (connect failed) — will retry on a later request.');
+          if (useVoiceflowOAuth()) console.warn('[voiceflow-mcp] if not yet authorized, visit /oauth/start once to consent.');
+        }
+      } catch (err) {
+        mcpDiag.error = (err as Error).message;
+        vfLoadCooldownUntil = Date.now() + 15_000;
+        console.warn('[voiceflow-mcp] load failed:', (err as Error).message);
+      } finally {
+        vfLoadInflight = undefined;
       }
-    }
-    if (attempt < 3) await new Promise((r) => setTimeout(r, 1500));
+      return vfToolsCache;
+    })();
   }
+  return vfLoadInflight;
+}
+
+if (useVoiceflowOAuth() || hasVoiceflowToken()) {
+  // Best-effort warm-up at boot so the first real request is fast; non-fatal if it
+  // fails (ensureVfTools will retry lazily on a later request).
+  await ensureVfTools();
 } else {
   console.warn(
     '[voiceflow-mcp] VF_MCP_TOKEN not set and VF_AUTH_MODE!=oauth — agents boot WITHOUT ' +
@@ -127,14 +154,14 @@ if (process.env.MEMORY_DISABLED) {
 
 // Workers (debug has its own structured-output helper; the rest come from specs).
 const workers: Record<string, Agent> = {
-  'debug-agent': buildDebugAgent(vfTools, workspace, memory),
+  'debug-agent': buildDebugAgent(ensureVfTools, workspace, memory),
 };
 for (const spec of WORKER_SPECS) {
-  workers[spec.key] = buildWorker(spec, vfTools, workspace, memory);
+  workers[spec.key] = buildWorker(spec, ensureVfTools, workspace, memory);
 }
 
 // Supervisor: delegates to the workers (auto `agent-<key>` tools).
-const orchestrator = buildOrchestrator(workers, vfTools, workspace, memory);
+const orchestrator = buildOrchestrator(workers, ensureVfTools, workspace, memory);
 
 export const mastra = new Mastra({
   agents: { orchestrator, ...workers },
@@ -217,9 +244,17 @@ export const mastra = new Mastra({
           if (!code) return c.text('Missing ?code in callback.', 400);
           try {
             await completeVoiceflowAuthorization(code);
+            // Fresh consent → drop any stale token/backoff state and load tools NOW so
+            // this warm instance is immediately usable (no redeploy / cold start needed).
+            resetVoiceflowTokenCache();
+            vfToolsLoaded = false;
+            vfToolsCache = {};
+            vfLoadCooldownUntil = 0;
+            const tools = await ensureVfTools();
+            const n = Object.keys(tools).length;
             return c.html(
-              '<h2>✅ Voiceflow MCP authorized</h2><p>Tokens stored. You can close this tab. ' +
-                'The copilot picks up the tools on its next cold start (or redeploy to force it).</p>',
+              `<h2>✅ Voiceflow MCP authorized</h2><p>Tokens stored and ${n} tool${n === 1 ? '' : 's'} loaded. ` +
+                'You can close this tab and start using the copilot.</p>',
             );
           } catch (e: any) {
             return c.text(`OAuth callback failed: ${e?.message ?? e}`, 500);

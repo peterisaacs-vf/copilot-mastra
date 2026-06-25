@@ -6,6 +6,7 @@ import { extractJsonObject } from '../../lib/extractJson';
 import type { Workspace } from '@mastra/core/workspace';
 import type { Memory } from '@mastra/memory';
 import { makeContextProcessors } from '../memory';
+import { resolveToolsArg, type ToolsArg } from '../dynamicTools';
 
 /**
  * Structured result of a single-transcript debug. Core fields
@@ -96,17 +97,18 @@ export const DEBUG_MAX_STEPS = 12;
 export const DEBUG_MAX_TOKENS = 8000;
 
 export function buildDebugAgent(
-  tools: Record<string, any> = {},
+  tools: ToolsArg = {},
   workspace?: Workspace,
   memory?: Memory,
 ): Agent {
+  const vfTools = resolveToolsArg(tools);
   return new Agent({
     id: 'debug-agent',
     name: 'debug-agent',
     description: DEBUG_AGENT_DESCRIPTION,
     instructions: buildDebugInstructions(),
     model: mainModel,
-    tools,
+    tools: async (ctx: any) => ({ ...(await vfTools(ctx)) }),
     workspace,
     memory,
     inputProcessors: makeContextProcessors(),
