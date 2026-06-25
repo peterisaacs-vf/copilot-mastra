@@ -148,3 +148,352 @@ export async function resetVoiceflowOAuth(): Promise<void> {
   if (s instanceof PgOAuthStorage) await s.clearAll();
   storageSingleton = undefined;
 }
+
+// ---- Runtime token manager ----------------------------------------------
+//
+// The Voiceflow auth server issues VERY short-lived access tokens (~60s). The MCP
+// SDK's built-in OAuth (authProvider) forces a token *refresh on every connect* and
+// re-runs the full authorization flow on any refresh hiccup (invalidateCredentials →
+// startAuthorization) — which, headless on serverless, just fails the connect and
+// boots with 0 tools. Instead of handing the SDK an authProvider, we drive auth
+// ourselves: a small token manager mints a fresh access token, caches it for its
+// (short) lifetime, serializes concurrent refreshes in-process, and ALWAYS persists a
+// rotated refresh token. The MCPClient then runs in plain bearer mode via a custom
+// `fetch` that injects the current token on every request (and force-refreshes once on
+// a 401). This makes both cold-start boot and long-lived tool calls resilient to the
+// 60s expiry without the SDK's fragile reauthorize-on-connect behavior.
+
+let accessCache: { token: string; expMs: number } | undefined;
+let refreshInflight: Promise<string> | undefined;
+let tokenEndpointCache: string | undefined;
+// Back off the token ENDPOINT after a failed refresh so we don't hammer it (the auth
+// server rate-limits — 429 — and a stranded/rotated refresh token would otherwise be
+// retried in a tight loop). A still-valid stored access token is used regardless of this.
+let refreshCooldownUntil = 0;
+let lastRefreshError: Error | undefined;
+
+async function discoverTokenEndpoint(): Promise<string> {
+  if (tokenEndpointCache) return tokenEndpointCache;
+  const base = env.vf.oauthAuthServer || 'https://auth-api.voiceflow.com';
+  try {
+    const meta: any = await fetchWithTimeout(
+      `${base.replace(/\/$/, '')}/.well-known/oauth-authorization-server`,
+      { headers: { accept: 'application/json' } },
+      10_000,
+    ).then((r) => r.json());
+    if (meta?.token_endpoint) {
+      tokenEndpointCache = String(meta.token_endpoint);
+      return tokenEndpointCache;
+    }
+  } catch {
+    /* fall through to the known default */
+  }
+  const fallback = 'https://auth-api.voiceflow.com/v1alpha1/oauth2/token';
+  tokenEndpointCache = fallback;
+  return fallback;
+}
+
+function accessTokenExpMs(token: string, fallbackSec = 55): number {
+  const claims = decodeJwtClaims(token);
+  const exp = claims && typeof (claims as any).exp === 'number' ? (claims as any).exp : undefined;
+  return exp ? exp * 1000 : Date.now() + fallbackSec * 1000;
+}
+
+/** POST grant_type=refresh_token. Returns the parsed token response (or throws). */
+async function postRefresh(refreshToken: string, clientId?: string): Promise<any> {
+  const endpoint = await discoverTokenEndpoint();
+  const form = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, scope: SCOPE });
+  if (clientId) form.set('client_id', clientId);
+  // Mirror the RFC 8707 resource indicator the original code-exchange used.
+  form.set('resource', env.vf.oauthResource || env.vf.mcpUrl);
+  const res = await fetchWithTimeout(
+    endpoint,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+      body: form.toString(),
+    },
+    15_000,
+  );
+  const text = await res.text();
+  let body: any;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = { raw: text };
+  }
+  if (!res.ok) {
+    const err = new Error(`refresh failed ${res.status}: ${body?.error ?? text.slice(0, 120)}`);
+    (err as any).oauthError = body?.error;
+    (err as any).status = res.status;
+    throw err;
+  }
+  return body;
+}
+
+async function doRefresh(): Promise<string> {
+  const provider = makeVoiceflowOAuthProvider();
+  const stored: any = await (provider as any).tokens();
+
+  // If storage already holds a still-valid access token (e.g. another instance just
+  // refreshed and persisted it), use it without spending our refresh token.
+  if (stored?.access_token) {
+    const expMs = accessTokenExpMs(stored.access_token);
+    if (expMs - Date.now() > 10_000) {
+      accessCache = { token: stored.access_token, expMs };
+      return stored.access_token;
+    }
+  }
+  if (!stored?.refresh_token) {
+    throw new Error('No Voiceflow refresh token in storage — visit /oauth/start to consent.');
+  }
+  // Don't hit a recently-failing / rate-limited token endpoint again until the cooldown
+  // elapses (the fresh-stored-token fast path above still works during the cooldown).
+  if (Date.now() < refreshCooldownUntil) {
+    throw lastRefreshError ?? new Error('Voiceflow token refresh cooling down after a recent failure.');
+  }
+  const ci: any = await (provider as any).clientInformation();
+  try {
+    const fresh = await postRefresh(stored.refresh_token, ci?.client_id);
+    // Persist (preserve the old refresh_token if the server didn't rotate it).
+    const merged = { ...stored, ...fresh, refresh_token: fresh.refresh_token ?? stored.refresh_token };
+    await (provider as any).saveTokens(merged);
+    const expMs = accessTokenExpMs(fresh.access_token, fresh.expires_in ?? 55);
+    accessCache = { token: fresh.access_token, expMs };
+    refreshCooldownUntil = 0;
+    lastRefreshError = undefined;
+    return fresh.access_token;
+  } catch (e: any) {
+    // Rotation race: another serverless instance may have already consumed this refresh
+    // token and saved a newer pair. The auth server returns invalid_grant (400) OR a 500
+    // for a consumed/rotated refresh token, so re-read storage on ANY failure and use the
+    // newer access token if one is now present and fresh.
+    const again: any = await (provider as any).tokens();
+    if (again?.access_token && again.access_token !== stored.access_token) {
+      const expMs = accessTokenExpMs(again.access_token);
+      if (expMs - Date.now() > 5_000) {
+        accessCache = { token: again.access_token, expMs };
+        refreshCooldownUntil = 0;
+        lastRefreshError = undefined;
+        return again.access_token;
+      }
+    }
+    // Back off the endpoint for 30s (covers 429 rate-limiting and stranded refresh tokens).
+    lastRefreshError = new Error(
+      `Voiceflow token refresh failed (${e?.message ?? e}). If this persists, the stored ` +
+        'refresh token is no longer valid — visit /oauth/start to re-consent.',
+    );
+    refreshCooldownUntil = Date.now() + 30_000;
+    throw lastRefreshError;
+  }
+}
+
+/** Get a currently-valid Voiceflow access token, refreshing if needed. */
+export async function getFreshVoiceflowAccessToken(force = false): Promise<string> {
+  if (!force && accessCache && accessCache.expMs - Date.now() > 10_000) return accessCache.token;
+  if (refreshInflight) return refreshInflight;
+  refreshInflight = doRefresh().finally(() => {
+    refreshInflight = undefined;
+  });
+  return refreshInflight;
+}
+
+/**
+ * A `fetch` for the MCPClient that runs the Voiceflow MCP in plain-bearer mode:
+ * it injects a freshly-minted access token on every request and force-refreshes
+ * once on a 401. No authProvider → none of the SDK's reauthorize-on-connect path.
+ */
+export function makeVoiceflowAuthFetch(): (url: any, init?: any) => Promise<Response> {
+  return async (url: any, init?: any) => {
+    const withAuth = (token: string) => {
+      const headers = new Headers((init?.headers as any) ?? {});
+      headers.set('authorization', `Bearer ${token}`);
+      return { ...init, headers };
+    };
+    let token = await getFreshVoiceflowAccessToken();
+    let res = await fetch(url, withAuth(token));
+    if (res.status === 401) {
+      token = await getFreshVoiceflowAccessToken(true);
+      res = await fetch(url, withAuth(token));
+    }
+    return res;
+  };
+}
+
+// ---- Diagnostics ---------------------------------------------------------
+
+function decodeJwtClaims(token: string): Record<string, unknown> | null {
+  const parts = token.split('.');
+  if (parts.length !== 3) return null; // not a JWT (opaque token)
+  try {
+    const json = Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
+ * Deep, on-demand probe of the Voiceflow MCP OAuth path. Surfaced via
+ * GET /_diag/mcp-probe so we can diagnose connect failures with one curl instead
+ * of reading serverless logs. It reports, WITHOUT leaking secrets:
+ *   - what's in storage (client_id, token shape, decoded JWT aud/exp/scope)
+ *   - whether the stored access token is actually accepted by the MCP server
+ *   - the exact result of a manual refresh against the token endpoint
+ *   - the verdict from the SDK's auth() (AUTHORIZED vs REDIRECT)
+ * This pinpoints whether 0-tools is caused by an expired token, an audience/scope
+ * mismatch, a failing refresh, or a connectivity problem.
+ */
+export async function probeVoiceflowMcp(): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = { mcpUrl: env.vf.mcpUrl };
+  const provider = makeVoiceflowOAuthProvider();
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  // 1) Stored client + token shape (+ decoded JWT claims if it's a JWT).
+  let access: string | undefined;
+  let refresh: string | undefined;
+  try {
+    const ci: any = await (provider as any).clientInformation();
+    out.clientId = ci?.client_id ?? null;
+  } catch (e: any) {
+    out.clientInfoError = e?.message ?? String(e);
+  }
+  try {
+    const tk: any = await (provider as any).tokens();
+    access = tk?.access_token;
+    refresh = tk?.refresh_token;
+    const claims = access ? decodeJwtClaims(access) : null;
+    out.tokens = tk
+      ? {
+          has_access: !!access,
+          has_refresh: !!refresh,
+          token_type: tk.token_type,
+          scope: tk.scope,
+          expires_in: tk.expires_in,
+          access_len: access?.length,
+          is_jwt: !!claims,
+          jwt: claims
+            ? {
+                aud: (claims as any).aud,
+                iss: (claims as any).iss,
+                scope: (claims as any).scope,
+                exp: (claims as any).exp,
+                exp_in_sec: typeof (claims as any).exp === 'number' ? (claims as any).exp - nowSec : undefined,
+                expired: typeof (claims as any).exp === 'number' ? (claims as any).exp < nowSec : undefined,
+              }
+            : undefined,
+        }
+      : null;
+  } catch (e: any) {
+    out.tokensError = e?.message ?? String(e);
+  }
+
+  // 2) Does the MCP server accept the stored access token? Direct initialize POST.
+  const initBody = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'probe', version: '0' } },
+  });
+  try {
+    const res = await fetchWithTimeout(
+      env.vf.mcpUrl,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          ...(access ? { authorization: `Bearer ${access}` } : {}),
+        },
+        body: initBody,
+      },
+      15_000,
+    );
+    out.initWithToken = {
+      status: res.status,
+      wwwAuthenticate:
+        res.headers.get('www-authenticate') ?? res.headers.get('x-amzn-remapped-www-authenticate'),
+      body: (await res.text()).slice(0, 300),
+    };
+  } catch (e: any) {
+    out.initWithTokenError = `${e?.name}: ${e?.message ?? String(e)}`;
+  }
+
+  // 3) Manual refresh against the token endpoint — captures the EXACT refresh error.
+  try {
+    const asMeta: any = await fetchWithTimeout(
+      'https://auth-api.voiceflow.com/.well-known/oauth-authorization-server',
+      { headers: { accept: 'application/json' } },
+      10_000,
+    ).then((r) => r.json());
+    const tokenEndpoint = asMeta?.token_endpoint;
+    out.tokenEndpoint = tokenEndpoint ?? null;
+    if (tokenEndpoint && refresh) {
+      const form = new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refresh,
+        scope: SCOPE,
+      });
+      const ci: any = await (provider as any).clientInformation();
+      if (ci?.client_id) form.set('client_id', ci.client_id);
+      // Mirror the resource indicator the SDK sends (validateResourceURL override).
+      form.set('resource', env.vf.oauthResource || env.vf.mcpUrl);
+      const res = await fetchWithTimeout(
+        tokenEndpoint,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+          body: form.toString(),
+        },
+        15_000,
+      );
+      const txt = await res.text();
+      out.manualRefresh = { status: res.status, ok: res.ok, body: txt.slice(0, 120) };
+      // If the refresh succeeded, PERSIST the rotated tokens (Voiceflow rotates the
+      // refresh token, so not saving would strand it), then verify the new access token.
+      try {
+        const fresh = JSON.parse(txt);
+        const newAccess = fresh?.access_token;
+        if (newAccess && res.ok) {
+          const cur: any = await (provider as any).tokens();
+          await (provider as any).saveTokens({
+            ...cur,
+            ...fresh,
+            refresh_token: fresh.refresh_token ?? cur?.refresh_token,
+          });
+          out.manualRefreshSaved = true;
+          const r2 = await fetchWithTimeout(
+            env.vf.mcpUrl,
+            {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json',
+                accept: 'application/json, text/event-stream',
+                authorization: `Bearer ${newAccess}`,
+              },
+              body: initBody,
+            },
+            15_000,
+          );
+          out.initWithRefreshedToken = { status: r2.status, body: (await r2.text()).slice(0, 200) };
+        }
+      } catch {
+        /* body not JSON */
+      }
+    }
+  } catch (e: any) {
+    out.manualRefreshError = `${e?.name}: ${e?.message ?? String(e)}`;
+  }
+
+  return out;
+}

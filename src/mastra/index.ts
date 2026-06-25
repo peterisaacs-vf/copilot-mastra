@@ -16,7 +16,7 @@ import { pgMemory, localMemory, CONTEXT_TOKEN_BUDGET, OBSERVATIONAL_MEMORY } fro
 import { skillRoutingScorer } from './scorers/skillRouting';
 import { skillRoutingJudgeScorer } from './scorers/skillRoutingJudge';
 import { hasVoiceflowToken, hasGlmKey, useVoiceflowOAuth, env } from '../config/env';
-import { beginVoiceflowAuthorization, completeVoiceflowAuthorization, hasVoiceflowTokens, resetVoiceflowOAuth } from './oauth';
+import { beginVoiceflowAuthorization, completeVoiceflowAuthorization, hasVoiceflowTokens, resetVoiceflowOAuth, probeVoiceflowMcp } from './oauth';
 
 if (!hasGlmKey()) {
   console.warn(
@@ -35,18 +35,26 @@ const mcpDiag: Record<string, unknown> = {
   tools: 0,
 };
 if (useVoiceflowOAuth() || hasVoiceflowToken()) {
-  try {
-    vfTools = await getVoiceflowTools();
-    const names = Object.keys(vfTools);
-    mcpDiag.tools = names.length;
-    mcpDiag.names = names.slice(0, 40);
-    console.info(`[voiceflow-mcp] loaded ${names.length} tools (${useVoiceflowOAuth() ? 'oauth' : 'token'})`);
-  } catch (err) {
-    mcpDiag.error = (err as Error).message;
-    console.warn('[voiceflow-mcp] failed to load tools:', (err as Error).message);
-    if (useVoiceflowOAuth()) {
-      console.warn('[voiceflow-mcp] OAuth mode: if not yet authorized, visit /oauth/start once to consent.');
+  // Retry the cold-start connect a couple times — the first connect mints a token and
+  // can race a concurrent refresh on another instance; a quick retry avoids booting
+  // the whole instance with 0 tools over a transient hiccup.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      vfTools = await getVoiceflowTools();
+      const names = Object.keys(vfTools);
+      mcpDiag.tools = names.length;
+      mcpDiag.names = names.slice(0, 40);
+      delete mcpDiag.error;
+      console.info(`[voiceflow-mcp] loaded ${names.length} tools (${useVoiceflowOAuth() ? 'oauth' : 'token'}, attempt ${attempt})`);
+      if (names.length > 0) break;
+    } catch (err) {
+      mcpDiag.error = (err as Error).message;
+      console.warn(`[voiceflow-mcp] attempt ${attempt} failed to load tools:`, (err as Error).message);
+      if (useVoiceflowOAuth()) {
+        console.warn('[voiceflow-mcp] OAuth mode: if not yet authorized, visit /oauth/start once to consent.');
+      }
     }
+    if (attempt < 3) await new Promise((r) => setTimeout(r, 1500));
   }
 } else {
   console.warn(
@@ -153,6 +161,18 @@ export const mastra = new Mastra({
       registerApiRoute('/_diag/mcp', {
         method: 'GET',
         handler: async (c) => c.json(mcpDiag),
+      }),
+      // Deep, on-demand OAuth probe: decodes the stored token, tests it against the
+      // MCP server, and does a manual refresh — pinpoints WHY tools fail to load.
+      registerApiRoute('/_diag/mcp-probe', {
+        method: 'GET',
+        handler: async (c) => {
+          try {
+            return c.json(await probeVoiceflowMcp());
+          } catch (e: any) {
+            return c.json({ error: e?.message ?? String(e) }, 500);
+          }
+        },
       }),
       // OAuth (VF_AUTH_MODE=oauth): visit /oauth/start once in a browser to consent;
       // the server redirects you to Voiceflow, then back to /oauth/callback, which
