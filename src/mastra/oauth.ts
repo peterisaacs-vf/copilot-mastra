@@ -306,23 +306,141 @@ export async function getFreshVoiceflowAccessToken(force = false): Promise<strin
   return refreshInflight;
 }
 
+// ---- MCP wire sanitizers -------------------------------------------------
+//
+// The Voiceflow MCP exposes two JSON-Schema shapes that break host serializers; we
+// neutralize both at the wire (in the custom fetch) so Mastra never sees them:
+//
+//   (A) Prototype-pollution key. `voiceflow_project` has a param literally named
+//       `prototype`. Mastra serializes tool schemas with SuperJSON, whose pollution
+//       guard hard-rejects ANY object containing a `prototype` (or `__proto__` /
+//       `constructor`) key — "Detected property prototype … prototype pollution risk".
+//       That throws during tool serialization and stalls agent runs to the 300s
+//       timeout. We strip those keys from tools/list + tools/call response bodies.
+//
+//   (B) Array arg flattened to a string. `globalPrompt` / `instructions` are typed as
+//       a recursive array (allOf → anyOf union); some hosts flatten that array argument
+//       to a string in transit, so the server's Zod rejects writes with
+//       "expected array, received string" (Linear COR-12408). We re-inflate those args
+//       to arrays on outgoing tools/call requests.
+//
+// Both are really server-side schema warts (rename the param; flatten the schema). These
+// are client-side shims so the copilot works until the MCP schemas are simplified.
+
+const POLLUTION_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+// Fields typed as arrays that some hosts flatten to a string (COR-12408).
+const ARRAY_TEXT_FIELDS = ['globalPrompt', 'instructions'];
+
+/** Rebuild a value omitting any forbidden (prototype-pollution) keys at every depth. */
+function stripPollutionDeep(v: any): any {
+  if (Array.isArray(v)) return v.map(stripPollutionDeep);
+  if (v && typeof v === 'object') {
+    const out: Record<string, any> = {};
+    for (const k of Object.keys(v)) {
+      if (POLLUTION_KEYS.has(k)) continue;
+      out[k] = stripPollutionDeep(v[k]);
+    }
+    return out;
+  }
+  return v;
+}
+
+/** Apply a JSON transform to an MCP response body (plain JSON or SSE `data:` frames). */
+function transformMcpBody(text: string, fn: (json: any) => any): string {
+  const apply = (payload: string): string => {
+    try {
+      return JSON.stringify(fn(JSON.parse(payload)));
+    } catch {
+      return payload;
+    }
+  };
+  if (/^\s*[[{]/.test(text)) return apply(text); // plain JSON
+  return text
+    .split(/\r?\n/)
+    .map((line) => {
+      const m = /^data:\s*(.*)$/.exec(line);
+      if (!m) return line;
+      const payload = m[1].trim();
+      if (!payload.startsWith('{') && !payload.startsWith('[')) return line;
+      return 'data: ' + apply(payload);
+    })
+    .join('\n');
+}
+
+/** Coerce a value that should be an array but arrived as a string back into an array. */
+function inflateArrayArg(v: any): any {
+  if (Array.isArray(v) || v == null) return v;
+  if (typeof v === 'string') {
+    const s = v.trim();
+    if (s.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(s);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        /* not JSON — fall through to wrapping */
+      }
+    }
+    return [v]; // wrap a plain string as a single-element array
+  }
+  return v;
+}
+
+/** Re-inflate flattened array args on an outgoing tools/call request body (COR-12408). */
+function fixOutgoingBody(body: unknown): unknown {
+  if (typeof body !== 'string' || !body.includes('"method":"tools/call"')) return body;
+  try {
+    const rpc = JSON.parse(body);
+    const args = rpc?.params?.arguments;
+    if (!args || typeof args !== 'object') return body;
+    let changed = false;
+    for (const f of ARRAY_TEXT_FIELDS) {
+      if (f in args && typeof args[f] === 'string') {
+        args[f] = inflateArrayArg(args[f]);
+        changed = true;
+      }
+    }
+    if (!changed) return body;
+    console.info(`[vf-mcp] re-inflated array arg(s) [${ARRAY_TEXT_FIELDS.join(',')}] for ${rpc?.params?.name}`);
+    return JSON.stringify(rpc);
+  } catch {
+    return body;
+  }
+}
+
 /**
  * A `fetch` for the MCPClient that runs the Voiceflow MCP in plain-bearer mode:
  * it injects a freshly-minted access token on every request and force-refreshes
  * once on a 401. No authProvider → none of the SDK's reauthorize-on-connect path.
+ * It also applies the wire sanitizers above (prototype-key strip + array re-inflation).
  */
 export function makeVoiceflowAuthFetch(): (url: any, init?: any) => Promise<Response> {
   return async (url: any, init?: any) => {
+    const body = fixOutgoingBody(init?.body); // (B) outgoing
     const withAuth = (token: string) => {
       const headers = new Headers((init?.headers as any) ?? {});
       headers.set('authorization', `Bearer ${token}`);
-      return { ...init, headers };
+      return { ...init, body, headers };
     };
     let token = await getFreshVoiceflowAccessToken();
     let res = await fetch(url, withAuth(token));
     if (res.status === 401) {
       token = await getFreshVoiceflowAccessToken(true);
       res = await fetch(url, withAuth(token));
+    }
+    // (A) Strip prototype-pollution keys from tool list/call responses so Mastra's
+    // SuperJSON serializer doesn't throw on the `prototype` param of voiceflow_project.
+    const reqBody = typeof init?.body === 'string' ? init.body : '';
+    const isToolPayload =
+      reqBody.includes('"method":"tools/list"') || reqBody.includes('"method":"tools/call"');
+    if (res.ok && isToolPayload) {
+      const text = await res.text();
+      const cleaned = /"(?:prototype|__proto__|constructor)"/.test(text)
+        ? transformMcpBody(text, stripPollutionDeep)
+        : text;
+      const headers = new Headers(res.headers);
+      headers.delete('content-encoding');
+      headers.delete('content-length');
+      return new Response(cleaned, { status: res.status, statusText: res.statusText, headers });
     }
     return res;
   };
