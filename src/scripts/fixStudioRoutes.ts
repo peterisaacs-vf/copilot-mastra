@@ -21,7 +21,11 @@ if (!existsSync(cfgPath)) {
   process.exit(0);
 }
 
-const cfg = JSON.parse(readFileSync(cfgPath, 'utf8')) as { version: number; routes: unknown[] };
+const cfg = JSON.parse(readFileSync(cfgPath, 'utf8')) as {
+  version: number;
+  routes: unknown[];
+  crons?: { path: string; schedule: string }[];
+};
 cfg.routes = [
   { src: '/', dest: '/index.html' },
   { src: '/api/(.*)', dest: '/' },
@@ -31,5 +35,10 @@ cfg.routes = [
   { handle: 'filesystem' },
   { src: '/(.*)', dest: '/index.html' },
 ];
+// Keep-warm cron: ping /_diag/storage every 3 minutes so (a) the Neon DB doesn't
+// auto-suspend (~5 min idle) and (b) a function instance stays warm with the MCP
+// tools already loaded — eliminating the multi-second cold start on the first real
+// request. /_diag/storage runs a real pg query, which is what keeps Neon awake.
+cfg.crons = [{ path: '/_diag/storage', schedule: '*/3 * * * *' }];
 writeFileSync(cfgPath, JSON.stringify(cfg));
-console.log('[vercel:routes] patched config.json — Studio SPA now served at /');
+console.log('[vercel:routes] patched config.json — Studio SPA at / + keep-warm cron (/_diag/storage every 3m)');
