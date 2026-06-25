@@ -20,6 +20,13 @@ individual components, see the composable skills: `prompting`,
 
 ## Build from Scratch — Guided Workflow
 
+**Pace it — one step per turn.** When building against a live workspace, create
+artifacts incrementally: one major step per response (project → global prompt →
+main agent instructions → each playbook → KB docs → each function → wiring → tests).
+NEVER attempt the entire build in a single turn — a turn is capped at ~5 minutes,
+so batching every create call into one response will time out mid-build. After each
+step, say what you created and what's next, then continue.
+
 ### Phase 1: Discovery
 
 The brief is never complete. Ask questions to fill gaps BEFORE designing.
