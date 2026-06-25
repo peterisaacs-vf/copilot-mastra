@@ -16,7 +16,7 @@ import { pgMemory, localMemory, CONTEXT_TOKEN_BUDGET, OBSERVATIONAL_MEMORY } fro
 import { skillRoutingScorer } from './scorers/skillRouting';
 import { skillRoutingJudgeScorer } from './scorers/skillRoutingJudge';
 import { hasVoiceflowToken, hasGlmKey, useVoiceflowOAuth, env } from '../config/env';
-import { beginVoiceflowAuthorization, completeVoiceflowAuthorization, hasVoiceflowTokens } from './oauth';
+import { beginVoiceflowAuthorization, completeVoiceflowAuthorization, hasVoiceflowTokens, resetVoiceflowOAuth } from './oauth';
 
 if (!hasGlmKey()) {
   console.warn(
@@ -169,6 +169,20 @@ export const mastra = new Mastra({
             return c.redirect(url.toString(), 302);
           } catch (e: any) {
             return c.text(`OAuth start failed: ${e?.message ?? e}`, 500);
+          }
+        },
+      }),
+      registerApiRoute('/oauth/reset', {
+        method: 'GET',
+        handler: async (c) => {
+          if (c.req.query('confirm') !== 'yes') {
+            return c.text('Add ?confirm=yes to clear ALL stored OAuth state (client + tokens). You will then need /oauth/start again.', 400);
+          }
+          try {
+            await resetVoiceflowOAuth();
+            return c.text('OAuth state cleared. Visit /oauth/start to consent fresh.', 200);
+          } catch (e: any) {
+            return c.text(`OAuth reset failed: ${e?.message ?? e}`, 500);
           }
         },
       }),

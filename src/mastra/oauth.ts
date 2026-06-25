@@ -136,3 +136,15 @@ export async function hasVoiceflowTokens(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Clear ALL stored OAuth state (registered client, PKCE verifier, access/refresh
+ * tokens) so the next /oauth/start re-registers a fresh client and requires a new
+ * consent. Needed when switching auth servers/environments — otherwise the stale
+ * client_id and tokens from the previous environment are reused.
+ */
+export async function resetVoiceflowOAuth(): Promise<void> {
+  const s = storage();
+  if (s instanceof PgOAuthStorage) await s.clearAll();
+  storageSingleton = undefined;
+}
