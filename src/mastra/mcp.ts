@@ -19,6 +19,11 @@ export function createVoiceflowMcp(): MCPClient {
         voiceflow: {
           url: new URL(env.vf.mcpUrl),
           authProvider: makeVoiceflowOAuthProvider(),
+          // Default connect timeout is 3s; the OAuth handshake + cold connect to the prod
+          // MCP regularly exceeds it, which fails the Streamable HTTP connect, falls back
+          // to SSE (405), and boots the instance with 0 tools. Raise connect + request timeouts.
+          connectTimeout: 30000,
+          timeout: 30000,
         },
       },
     });
@@ -37,6 +42,8 @@ export function createVoiceflowMcp(): MCPClient {
         requestInit: {
           headers: { Authorization: `Bearer ${env.vf.mcpToken}` },
         },
+        connectTimeout: 30000,
+        timeout: 30000,
       },
     },
   });
