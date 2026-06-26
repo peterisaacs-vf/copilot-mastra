@@ -331,6 +331,34 @@ const POLLUTION_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 // Fields typed as arrays that some hosts flatten to a string (COR-12408).
 const ARRAY_TEXT_FIELDS = ['globalPrompt', 'instructions'];
 
+// Draft-editing tools take the project's *draftVersionID* in `environmentID`. The
+// model frequently sends the environment `id` or the alias "development" instead,
+// which 404s ("Version does not exist") and collapses a whole build (COR-12557).
+// We auto-resolve the correct draftVersionID below from a cache harvested out of
+// the project.get/create responses the agent already makes — no extra API calls.
+// KB/document/environment ops are deliberately EXCLUDED (they take the env id).
+const DRAFT_EDIT_OPS = new Set([
+  'agent_global_prompt',
+  'agent_instructions',
+  'routing',
+  'playbook',
+  'function',
+  'variable',
+  'behavior',
+  'api_tool',
+  'tool',
+  'mcp_tool',
+  'system_tool',
+]);
+// projectID -> { main: Main env's draftVersionID, drafts: every env's draftVersionID }
+const draftVersionCache = new Map<string, { main: string; drafts: Set<string> }>();
+
+/** Bare op name from a namespaced tool name (handles single- and double-`voiceflow_` prefixes). */
+function bareToolName(name: string): string {
+  const i = name.lastIndexOf('voiceflow_');
+  return i >= 0 ? name.slice(i + 'voiceflow_'.length) : name;
+}
+
 /** Rebuild a value omitting any forbidden (prototype-pollution) keys at every depth. */
 function stripPollutionDeep(v: any): any {
   if (Array.isArray(v)) return v.map(stripPollutionDeep);
@@ -385,27 +413,113 @@ function inflateArrayArg(v: any): any {
   return v;
 }
 
-/** Re-inflate flattened array args on an outgoing tools/call request body (COR-12408). */
+/** Cache projectID -> draftVersionID(s) from a voiceflow_project get/create tool output. */
+function cacheProjectDrafts(out: any): void {
+  const projects: any[] = [];
+  if (out?.project) projects.push(out.project);
+  if (out?.environments && (out?._id || out?.id)) projects.push(out);
+  if (Array.isArray(out)) for (const x of out) if (x?.environments) projects.push(x);
+  for (const p of projects) {
+    const pid: string | undefined = p?._id ?? p?.id;
+    const envs = p?.environments;
+    if (!pid || !envs || typeof envs !== 'object') continue;
+    const drafts = new Set<string>();
+    let main: string | undefined;
+    for (const e of Object.values<any>(envs)) {
+      if (e?.draftVersionID) {
+        drafts.add(e.draftVersionID);
+        if (e?.isMain) main = e.draftVersionID;
+      }
+    }
+    if (!main && drafts.size) main = [...drafts][0];
+    if (main) draftVersionCache.set(pid, { main, drafts });
+  }
+}
+
+/** Scan an MCP tools/call response (plain JSON or SSE frames) for project draft versions. */
+function harvestDraftVersions(text: string): void {
+  const scan = (payload: string) => {
+    try {
+      const content = JSON.parse(payload)?.result?.content;
+      if (!Array.isArray(content)) return;
+      for (const c of content) {
+        if (c?.type === 'text' && typeof c.text === 'string') {
+          try {
+            cacheProjectDrafts(JSON.parse(c.text));
+          } catch {
+            /* tool output not JSON */
+          }
+        }
+      }
+    } catch {
+      /* not a JSON-RPC frame */
+    }
+  };
+  if (/^\s*[[{]/.test(text)) {
+    scan(text);
+    return;
+  }
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^data:\s*(.*)$/.exec(line);
+    if (m && m[1].trim().startsWith('{')) scan(m[1].trim());
+  }
+}
+
+/** Re-inflate flattened array args + auto-resolve environmentID on an outgoing tools/call body. */
 function fixOutgoingBody(body: unknown): unknown {
   if (typeof body !== 'string' || !body.includes('"method":"tools/call"')) return body;
   try {
     const rpc = JSON.parse(body);
     const args = rpc?.params?.arguments;
     if (!args || typeof args !== 'object') return body;
-    let changed = false;
+    let arrayChanged = false;
     for (const f of ARRAY_TEXT_FIELDS) {
       if (f in args && typeof args[f] === 'string') {
         args[f] = inflateArrayArg(args[f]);
-        changed = true;
+        arrayChanged = true;
       }
     }
-    if (!changed) return body;
-    console.info(`[vf-mcp] re-inflated array arg(s) [${ARRAY_TEXT_FIELDS.join(',')}] for ${rpc?.params?.name}`);
+    if (arrayChanged) {
+      console.info(
+        `[vf-mcp] re-inflated array arg(s) [${ARRAY_TEXT_FIELDS.join(',')}] for ${rpc?.params?.name}`,
+      );
+    }
+
+    // Auto-resolve a wrong environmentID to the project's draftVersionID (COR-12557).
+    // Only rewrite when the supplied id is NOT a known draft for this project (i.e.
+    // it's an env id / "development" / stale) — this preserves correct edits aimed at
+    // a non-Main environment's draft, and no-ops safely when the project is uncached.
+    let envChanged = false;
+    const op = bareToolName(String(rpc?.params?.name ?? ''));
+    if (
+      DRAFT_EDIT_OPS.has(op) &&
+      typeof args.projectID === 'string' &&
+      typeof args.environmentID === 'string'
+    ) {
+      const entry = draftVersionCache.get(args.projectID);
+      if (entry && !entry.drafts.has(args.environmentID)) {
+        console.info(
+          `[vf-mcp] env-id auto-resolve for ${rpc?.params?.name}: ${args.environmentID} -> ${entry.main}`,
+        );
+        args.environmentID = entry.main;
+        envChanged = true;
+      }
+    }
+
+    if (!arrayChanged && !envChanged) return body;
     return JSON.stringify(rpc);
   } catch {
     return body;
   }
 }
+
+/** @internal Exposed for unit tests only (test/envIdResolve). Not part of the public API. */
+export const __sanitizerTestHooks = {
+  fixOutgoingBody,
+  harvestDraftVersions,
+  cacheProjectDrafts,
+  draftVersionCache,
+};
 
 /**
  * A `fetch` for the MCPClient that runs the Voiceflow MCP in plain-bearer mode:
@@ -434,6 +548,9 @@ export function makeVoiceflowAuthFetch(): (url: any, init?: any) => Promise<Resp
       reqBody.includes('"method":"tools/list"') || reqBody.includes('"method":"tools/call"');
     if (res.ok && isToolPayload) {
       const text = await res.text();
+      // Harvest projectID -> draftVersionID from project.get/create so the outgoing
+      // sanitizer can auto-resolve environmentID on later draft-edit calls (COR-12557).
+      if (text.includes('draftVersionID')) harvestDraftVersions(text);
       const cleaned = /"(?:prototype|__proto__|constructor)"/.test(text)
         ? transformMcpBody(text, stripPollutionDeep)
         : text;
