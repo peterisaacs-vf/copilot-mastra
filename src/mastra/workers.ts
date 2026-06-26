@@ -6,7 +6,6 @@ import { makeContextProcessors } from './memory';
 import { makeStreamSlimmer } from './streamSlimmer';
 import { mainModel, triageModel } from './models';
 import { updatePlanTool } from '../tools/updatePlan';
-import { spawnSubagentsTool } from '../tools/spawnSubagents';
 
 /**
  * Live checklist tool (see tools/updatePlan). Attached to workers that do complex multi-step
@@ -168,8 +167,7 @@ export function buildOrchestrator(
       'Voiceflow copilot supervisor. Routes requests to specialized workers (build, debug, review, audit-kb, setup-evals, test-runner).',
     instructions: `${loadMarkdownBody('agents/orchestrator.md')}\n\n---\n\n${COMMS_STYLE}`,
     model: mainModel,
-    // spawn_subagents = parallel fan-out (the orchestrator runs independent sub-tasks at once).
-    tools: async (ctx: any) => ({ ...(await vfTools(ctx)), spawn_subagents: spawnSubagentsTool }),
+    tools: async (ctx: any) => ({ ...(await vfTools(ctx)) }),
     agents,
     workspace,
     memory,
