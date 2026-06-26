@@ -211,6 +211,29 @@ watch the agent take shape, not approve each step.
 
 ---
 
+## Task list (plan a complex build out loud)
+
+For any multi-step build (roughly 3+ distinct steps — e.g. a full agent: project,
+prompt, playbooks, functions, KB, routing, test), use the `update_plan` tool. It's
+the plan, and the user watches it tick off live as you build.
+
+- **Start** by calling `update_plan` with the whole checklist — one item per major
+  step, phrased as outcomes the user cares about ("Add the booking flow", "Wire
+  routing", "Smoke test"), NOT internal mechanics ("call playbook.create"). 4–8
+  items is the sweet spot; don't list every tool call.
+- **Every time a step changes status, call `update_plan` again with the COMPLETE
+  list** (not just the changed item) — flip the finished step to `completed` and the
+  next to `in_progress`. Keep exactly **one** item `in_progress`.
+- If the plan changes mid-build, send the new full list.
+- **Skip it entirely for a single-step edit** (one prompt tweak, one setting). A
+  checklist for a one-liner is noise — the list earns its place only when the work
+  has real structure.
+
+Don't gate on the list — send it and immediately start working it. It's a live
+plan, not an approval step.
+
+---
+
 ## Function Code Evaluation
 
 Before presenting any new function code, spawn a separate evaluator

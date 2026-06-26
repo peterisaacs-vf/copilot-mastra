@@ -2,29 +2,18 @@ import { Agent } from '@mastra/core/agent';
 import type { Workspace } from '@mastra/core/workspace';
 import type { Memory } from '@mastra/memory';
 import { loadMarkdownBody } from '../lib/loadPrompt';
-import {
-  taskWriteTool,
-  taskUpdateTool,
-  taskCompleteTool,
-  taskCheckTool,
-  TaskStateProcessor,
-} from '@mastra/core/tools';
 import { makeContextProcessors } from './memory';
 import { makeStreamSlimmer } from './streamSlimmer';
 import { mainModel, triageModel } from './models';
+import { updatePlanTool } from '../tools/updatePlan';
 
 /**
- * Mastra's native live to-do list. Attached to workers that do complex multi-step work so
- * they can lay out a plan and tick it off as they go. The list is published as a `tasks`
- * state signal (streams to the client as `data-tasks`, survives memory truncation) via the
- * TaskStateProcessor below; the /demo widget renders it as a live checklist.
+ * Live checklist tool (see tools/updatePlan). Attached to workers that do complex multi-step
+ * work via the `tasks` spec flag. The agent calls it with the full plan; the list rides out
+ * on the tool-call args (forwarded during delegation) and the /demo widget renders it.
+ * No native task-store/threadState dependency — those error on sub-agents that lack a thread.
  */
-const TASK_TOOLS = {
-  task_write: taskWriteTool,
-  task_update: taskUpdateTool,
-  task_complete: taskCompleteTool,
-  task_check: taskCheckTool,
-} as const;
+const PLAN_TOOLS = { update_plan: updatePlanTool } as const;
 import { loadPromptingGuideTool } from '../tools/promptingGuide';
 import { diffPromptsTool } from '../tools/diffPrompts';
 import { resolveToolsArg, type ToolsArg } from './dynamicTools';
@@ -146,16 +135,12 @@ export function buildWorker(
     tools: async (ctx: any) => ({
       ...(await vfTools(ctx)),
       ...(spec.localTools ?? {}),
-      ...(spec.tasks ? TASK_TOOLS : {}),
+      ...(spec.tasks ? PLAN_TOOLS : {}),
     }),
     workspace,
     memory,
     // Token-budget the assembled context (window + recall + working memory) at every step.
-    // When the worker keeps a task list, publish it as a `tasks` state signal so it persists
-    // across turns and streams to the UI as a live checklist.
-    inputProcessors: spec.tasks
-      ? [...makeContextProcessors(), new TaskStateProcessor()]
-      : makeContextProcessors(),
+    inputProcessors: makeContextProcessors(),
     defaultOptions: {
       maxSteps: DEFAULT_MAX_STEPS,
       modelSettings: { maxOutputTokens: spec.maxTokens ?? DEFAULT_MAX_TOKENS },
@@ -182,14 +167,11 @@ export function buildOrchestrator(
       'Voiceflow copilot supervisor. Routes requests to specialized workers (build, debug, review, audit-kb, setup-evals, test-runner).',
     instructions: `${loadMarkdownBody('agents/orchestrator.md')}\n\n---\n\n${COMMS_STYLE}`,
     model: mainModel,
-    // Task tools live on the orchestrator, not the workers: it owns the memory-backed thread
-    // (a delegated sub-agent has no thread for the task store, so the tools error there), and
-    // its `tasks` state signal streams top-level as `data-tasks` for the UI to render live.
-    tools: async (ctx: any) => ({ ...(await vfTools(ctx)), ...TASK_TOOLS }),
+    tools: async (ctx: any) => ({ ...(await vfTools(ctx)) }),
     agents,
     workspace,
     memory,
-    inputProcessors: [...makeContextProcessors(), new TaskStateProcessor()],
+    inputProcessors: makeContextProcessors(),
     // Drop the heavy sub-agent lifecycle chunks forwarded during delegation (see streamSlimmer):
     // ~7x smaller stream, which keeps long mobile builds from dropping the connection mid-build.
     outputProcessors: [makeStreamSlimmer()],
@@ -218,6 +200,7 @@ export const WORKER_SPECS: WorkerSpec[] = [
     skills: ['build-agent', 'document'],
     tier: 'main',
     localTools: { loadPromptingGuide: loadPromptingGuideTool, diffPrompts: diffPromptsTool },
+    tasks: true,
   },
   {
     key: 'review-agent',
