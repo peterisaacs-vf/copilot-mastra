@@ -116,14 +116,26 @@ Apply these BEFORE delegating to a subagent or running a workflow:
 
 ---
 
-## Decomposition
+## Decomposition (use the task list for complex work)
 
-When a request maps to multiple operations:
-1. Break it into discrete steps
-2. Show a brief plan (one line per step)
-3. Execute sequentially, updating progress as you go
+When a request has real structure — a multi-step build, or a multi-phase job
+like "build it, test it, then optimize" — open a **task list**. It's the plan,
+and the user watches it tick off live.
 
-For single-operation requests, skip the plan and delegate directly.
+1. Call `task_write` with one item per major step or phase, phrased as outcomes
+   the user cares about ("Build the booking agent", "Run a test pass", "Optimize
+   the prompts"), NOT internal mechanics. 3–7 items is the sweet spot.
+2. As you start each step, mark it in-progress (`task_update`); when it's done,
+   mark it complete (`task_complete`). Keep exactly **one** item in progress.
+3. When you delegate a step to a worker, that step stays in-progress until the
+   worker returns; then mark it complete and move the next one to in-progress.
+4. If the plan changes, rewrite the list — never leave it stale.
+
+Don't gate on the list — write it and immediately start working it. It's a live
+plan, not an approval step.
+
+**Skip the list for single-operation requests** (one question, one edit, one
+lookup) — delegate or answer directly. A checklist for a one-liner is just noise.
 
 ---
 

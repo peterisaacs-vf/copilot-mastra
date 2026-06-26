@@ -182,11 +182,14 @@ export function buildOrchestrator(
       'Voiceflow copilot supervisor. Routes requests to specialized workers (build, debug, review, audit-kb, setup-evals, test-runner).',
     instructions: `${loadMarkdownBody('agents/orchestrator.md')}\n\n---\n\n${COMMS_STYLE}`,
     model: mainModel,
-    tools: async (ctx: any) => ({ ...(await vfTools(ctx)) }),
+    // Task tools live on the orchestrator, not the workers: it owns the memory-backed thread
+    // (a delegated sub-agent has no thread for the task store, so the tools error there), and
+    // its `tasks` state signal streams top-level as `data-tasks` for the UI to render live.
+    tools: async (ctx: any) => ({ ...(await vfTools(ctx)), ...TASK_TOOLS }),
     agents,
     workspace,
     memory,
-    inputProcessors: makeContextProcessors(),
+    inputProcessors: [...makeContextProcessors(), new TaskStateProcessor()],
     // Drop the heavy sub-agent lifecycle chunks forwarded during delegation (see streamSlimmer):
     // ~7x smaller stream, which keeps long mobile builds from dropping the connection mid-build.
     outputProcessors: [makeStreamSlimmer()],
@@ -215,7 +218,6 @@ export const WORKER_SPECS: WorkerSpec[] = [
     skills: ['build-agent', 'document'],
     tier: 'main',
     localTools: { loadPromptingGuide: loadPromptingGuideTool, diffPrompts: diffPromptsTool },
-    tasks: true,
   },
   {
     key: 'review-agent',
