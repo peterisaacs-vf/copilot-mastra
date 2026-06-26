@@ -3,6 +3,7 @@ import type { Workspace } from '@mastra/core/workspace';
 import type { Memory } from '@mastra/memory';
 import { loadMarkdownBody } from '../lib/loadPrompt';
 import { makeContextProcessors } from './memory';
+import { makeStreamSlimmer } from './streamSlimmer';
 import { mainModel, triageModel } from './models';
 import { loadPromptingGuideTool } from '../tools/promptingGuide';
 import { diffPromptsTool } from '../tools/diffPrompts';
@@ -156,6 +157,9 @@ export function buildOrchestrator(
     workspace,
     memory,
     inputProcessors: makeContextProcessors(),
+    // Drop the heavy sub-agent lifecycle chunks forwarded during delegation (see streamSlimmer):
+    // ~7x smaller stream, which keeps long mobile builds from dropping the connection mid-build.
+    outputProcessors: [makeStreamSlimmer()],
     defaultOptions: {
       maxSteps: DEFAULT_MAX_STEPS,
       modelSettings: { maxOutputTokens: DEFAULT_MAX_TOKENS },
