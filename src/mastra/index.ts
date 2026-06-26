@@ -10,6 +10,7 @@ import type { MastraStorage } from '@mastra/core/storage';
 import type { Memory } from '@mastra/memory';
 import { VercelDeployer } from '@mastra/deployer-vercel';
 import { registerApiRoute } from '@mastra/core/server';
+import { DEMO_HTML } from './demoPage';
 import { MastraEditor } from '@mastra/editor';
 import { Client } from 'pg';
 import { getPostgresUrl, makePostgresStore, makeLibsqlStore, probePgvector, PG_SSL } from './storage';
@@ -189,6 +190,13 @@ export const mastra = new Mastra({
       registerApiRoute('/_diag/mcp', {
         method: 'GET',
         handler: async (c) => c.json(mcpDiag),
+      }),
+      // Custom in-order demo UI: one chronological column (message → reasoning → tool →
+      // skill → message) over the live /stream. The Studio playground splits the chat and
+      // the trace into separate panes, which is hard to follow during a live demo.
+      registerApiRoute('/demo', {
+        method: 'GET',
+        handler: async (c) => c.html(DEMO_HTML),
       }),
       // Admin: wipe ALL conversation memory (threads, messages, working memory,
       // observational memory, thread state, and semantic-recall vectors) for a clean
