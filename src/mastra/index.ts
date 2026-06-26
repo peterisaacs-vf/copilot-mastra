@@ -196,7 +196,11 @@ export const mastra = new Mastra({
       // the trace into separate panes, which is hard to follow during a live demo.
       registerApiRoute('/demo', {
         method: 'GET',
-        handler: async (c) => c.html(DEMO_HTML),
+        // no-store: the widget changes often during the demo build-out; never serve a stale copy.
+        handler: async (c) => {
+          c.header('Cache-Control', 'no-store');
+          return c.html(DEMO_HTML);
+        },
       }),
       // Admin: wipe ALL conversation memory (threads, messages, working memory,
       // observational memory, thread state, and semantic-recall vectors) for a clean
