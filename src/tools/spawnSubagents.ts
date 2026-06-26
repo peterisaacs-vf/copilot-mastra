@@ -18,12 +18,15 @@ import { z } from 'zod';
 export const spawnSubagentsTool = createTool({
   id: 'spawn_subagents',
   description:
-    'Run several INDEPENDENT sub-tasks in PARALLEL, each handled by its own build sub-agent, ' +
-    'and get all results back together. Use this to fan out genuinely independent work that ' +
-    'would otherwise run one-by-one (e.g. draft three playbooks at once, explore options in ' +
-    'parallel). Do NOT use it for a single task, or for steps that depend on each other — ' +
-    'delegate those normally. Each task prompt must be self-contained: the sub-agent cannot ' +
-    'see this conversation, so include every detail it needs.',
+    'Run 2+ INDEPENDENT deliverables in PARALLEL, each produced by its own sub-agent, and get ' +
+    'all results back together. ' +
+    'NOT for building or editing one agent: the parts of a single agent (project, prompt, ' +
+    'playbooks, KB, routing) share one project and depend on each other — that is one job, so ' +
+    'use the build-agent (normal delegation), which also streams its work live. ' +
+    'spawn_subagents is ONLY for genuinely separate artifacts that do NOT share a project or ' +
+    'depend on each other — e.g. drafting several standalone prompt options to compare, or ' +
+    'researching multiple topics at once. If in doubt, delegate normally. ' +
+    'Each task prompt must be fully self-contained — the sub-agent cannot see this conversation.',
   inputSchema: z.object({
     tasks: z
       .array(
@@ -34,9 +37,11 @@ export const spawnSubagentsTool = createTool({
             .describe('Complete, self-contained instruction for this sub-agent — all context included.'),
         }),
       )
-      .min(1)
+      // Floor of 2: a single task is never a fan-out — it should be a normal delegation
+      // (which streams live). This makes it structurally impossible to misuse for one build.
+      .min(2)
       .max(6)
-      .describe('Independent sub-tasks to run concurrently (max 6).'),
+      .describe('Two or more INDEPENDENT deliverables to run concurrently (max 6).'),
   }),
   execute: async ({ tasks }, context: any) => {
     const mastra = context?.mastra;

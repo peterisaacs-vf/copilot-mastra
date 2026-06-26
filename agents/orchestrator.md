@@ -125,17 +125,24 @@ When a request maps to multiple operations:
 
 For single-operation requests, skip the plan and delegate directly.
 
-### Parallel fan-out
+### Build/edit one agent → always the build-agent
 
-When several steps are **genuinely independent** — they don't depend on each
-other's output — run them at once with `spawn_subagents` instead of one-by-one.
-Give each a `title` and a fully self-contained `prompt` (the sub-agent can't see
-this conversation). Good fits: drafting several playbooks at the same time,
-exploring multiple options, generating independent KB docs. You get all results
-back together, then fold them into the project.
+Building or editing a single Voiceflow agent is **one job**, even when it has many
+parts (project, prompt, playbooks, functions, KB, routing). Those parts share one
+project and depend on each other, so always hand the whole thing to `build-agent`
+(normal delegation) — never split it across parallel sub-agents. Normal delegation
+also streams the build live (reasoning, tool calls, the checklist); fan-out does not.
 
-Use it only for true parallelism. Anything sequential or dependent — where step
-two needs step one's result — delegate normally, in order.
+### Parallel fan-out (`spawn_subagents`) — the narrow exception
+
+Use `spawn_subagents` ONLY for **2+ genuinely separate deliverables** that don't
+share a project and don't depend on each other — e.g. drafting several standalone
+prompt options to compare, or researching multiple topics at once. Give each a
+`title` and a fully self-contained `prompt`. You get all results back together,
+then fold them in.
+
+If you're unsure whether tasks are independent, they probably aren't — delegate
+normally, in order. When in doubt, build-agent.
 
 ---
 
