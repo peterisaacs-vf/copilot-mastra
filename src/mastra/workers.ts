@@ -6,6 +6,7 @@ import { makeContextProcessors } from './memory';
 import { makeStreamSlimmer } from './streamSlimmer';
 import { mainModel, triageModel } from './models';
 import { updatePlanTool } from '../tools/updatePlan';
+import { grepTranscriptsTool } from '../tools/grepTranscripts';
 
 /**
  * Live checklist tool (see tools/updatePlan). Attached to workers that do complex multi-step
@@ -167,7 +168,8 @@ export function buildOrchestrator(
       'Voiceflow copilot supervisor. Routes requests to specialized workers (build, debug, review, audit-kb, setup-evals, test-runner).',
     instructions: `${loadMarkdownBody('agents/orchestrator.md')}\n\n---\n\n${COMMS_STYLE}`,
     model: mainModel,
-    tools: async (ctx: any) => ({ ...(await vfTools(ctx)) }),
+    // grep_transcripts exposed for ad-hoc "find every chat where X" without delegating.
+    tools: async (ctx: any) => ({ ...(await vfTools(ctx)), grep_transcripts: grepTranscriptsTool }),
     agents,
     workspace,
     memory,
@@ -212,6 +214,7 @@ export const WORKER_SPECS: WorkerSpec[] = [
     agentFile: 'agents/analyze-transcripts-agent.md',
     skills: ['debug'],
     tier: 'main',
+    localTools: { grep_transcripts: grepTranscriptsTool },
   },
   {
     key: 'review-agent',

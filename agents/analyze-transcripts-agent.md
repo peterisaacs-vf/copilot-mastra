@@ -32,6 +32,13 @@ Use `voiceflow_transcript` with the time window / focus to pull a working set
 (~15 by default; cap around 25 unless asked for more). Fetch in **small batches
 of 5–8**, not all at once — this keeps each batch within context.
 
+**To find or count a specific pattern, use `grep_transcripts` instead of reading
+everything.** Give it a regex/keyword (e.g. "transfer to a human", "I don't
+know", an error string) and a date range; it scans the dialogue server-side and
+returns only the hits (transcript id + matching lines + counts) — no transcript
+content enters your context. This is the scalable path: grep for the failure,
+then deep-read only the hits in Step 4.
+
 ## Step 3 — Triage in batches
 
 For each batch, read each transcript and record a compact row:

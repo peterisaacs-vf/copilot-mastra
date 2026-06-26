@@ -11,6 +11,7 @@ import type { Memory } from '@mastra/memory';
 import { VercelDeployer } from '@mastra/deployer-vercel';
 import { registerApiRoute } from '@mastra/core/server';
 import { DEMO_HTML } from './demoPage';
+import { grepTranscriptsTool } from '../tools/grepTranscripts';
 import { MastraEditor } from '@mastra/editor';
 import { Client } from 'pg';
 import { getPostgresUrl, makePostgresStore, makeLibsqlStore, probePgvector, PG_SSL } from './storage';
@@ -268,6 +269,31 @@ export const mastra = new Mastra({
             return c.json(await probeVoiceflowMcp());
           } catch (e: any) {
             return c.json({ error: e?.message ?? String(e) }, 500);
+          }
+        },
+      }),
+      // Diagnostic + smoke test for grep_transcripts: GET /_diag/grep?projectID=..&pattern=..&limit=..
+      // Exercises the live OAuth fetch + content scan without going through an agent run.
+      registerApiRoute('/_diag/grep', {
+        method: 'GET',
+        handler: async (c) => {
+          const projectID = c.req.query('projectID');
+          const pattern = c.req.query('pattern');
+          if (!projectID || !pattern) {
+            return c.text('Add ?projectID=..&pattern=.. (optional &limit=, &startDate=, &endDate=)', 400);
+          }
+          const limit = c.req.query('limit') ? Number(c.req.query('limit')) : undefined;
+          try {
+            const out = await (grepTranscriptsTool as any).execute({
+              projectID,
+              pattern,
+              ...(limit ? { limit } : {}),
+              ...(c.req.query('startDate') ? { startDate: c.req.query('startDate') } : {}),
+              ...(c.req.query('endDate') ? { endDate: c.req.query('endDate') } : {}),
+            });
+            return c.json(out);
+          } catch (e: any) {
+            return c.json({ ok: false, error: e?.message ?? String(e) }, 500);
           }
         },
       }),

@@ -7,6 +7,7 @@ import type { Workspace } from '@mastra/core/workspace';
 import type { Memory } from '@mastra/memory';
 import { makeContextProcessors } from '../memory';
 import { resolveToolsArg, type ToolsArg } from '../dynamicTools';
+import { grepTranscriptsTool } from '../../tools/grepTranscripts';
 
 /**
  * Structured result of a single-transcript debug. Core fields
@@ -109,7 +110,7 @@ export function buildDebugAgent(
     description: DEBUG_AGENT_DESCRIPTION,
     instructions: buildDebugInstructions(),
     model: mainModel,
-    tools: async (ctx: any) => ({ ...(await vfTools(ctx)) }),
+    tools: async (ctx: any) => ({ ...(await vfTools(ctx)), grep_transcripts: grepTranscriptsTool }),
     workspace,
     memory,
     inputProcessors: makeContextProcessors(),
