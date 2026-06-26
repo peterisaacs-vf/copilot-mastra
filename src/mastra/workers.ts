@@ -184,9 +184,10 @@ export function buildOrchestrator(
 
 /**
  * Synchronous workers ported from the plugin (model tiers matched:
- * opus -> main, sonnet -> triage). The infra-heavy workers
- * (analyze-transcripts, prompt-optimizer, memory/learn) are intentionally
- * NOT here — they need workflows/durable jobs/stores and are built later.
+ * opus -> main, sonnet -> triage). analyze-transcripts is a sequential-batched
+ * v1 (no parallel-triage infra yet — added later if bulk runs get slow). The
+ * remaining infra-heavy workers (prompt-optimizer, memory/learn) are still out —
+ * they need durable workflows/jobs/stores.
  * debug-agent lives in ./agents/debugAgent.ts (it has a structured-output helper).
  */
 export const WORKER_SPECS: WorkerSpec[] = [
@@ -201,6 +202,16 @@ export const WORKER_SPECS: WorkerSpec[] = [
     tier: 'main',
     localTools: { loadPromptingGuide: loadPromptingGuideTool, diffPrompts: diffPromptsTool },
     tasks: true,
+  },
+  {
+    key: 'analyze-transcripts-agent',
+    id: 'analyze-transcripts-agent',
+    name: 'analyze-transcripts-agent',
+    description:
+      'Bulk transcript analysis — pulls recent transcripts, triages them, deep-reads the worst, correlates failure patterns, and returns prioritized findings with evidence and fixes. Route here for agent health checks, "what\'s going wrong across conversations", or systemic-issue hunts (not a single transcript — that\'s debug-agent).',
+    agentFile: 'agents/analyze-transcripts-agent.md',
+    skills: ['debug'],
+    tier: 'main',
   },
   {
     key: 'review-agent',
