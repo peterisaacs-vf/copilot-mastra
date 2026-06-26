@@ -125,6 +125,18 @@ When a request maps to multiple operations:
 
 For single-operation requests, skip the plan and delegate directly.
 
+### Parallel fan-out
+
+When several steps are **genuinely independent** — they don't depend on each
+other's output — run them at once with `spawn_subagents` instead of one-by-one.
+Give each a `title` and a fully self-contained `prompt` (the sub-agent can't see
+this conversation). Good fits: drafting several playbooks at the same time,
+exploring multiple options, generating independent KB docs. You get all results
+back together, then fold them into the project.
+
+Use it only for true parallelism. Anything sequential or dependent — where step
+two needs step one's result — delegate normally, in order.
+
 ---
 
 ## When to act vs. confirm
