@@ -93,6 +93,13 @@ playbook instructions.
 
 ### Phase 4: Build via API
 
+**`environmentID` = the draft version ID.** Every draft-editing call (global prompt,
+instructions, playbooks, functions, variables, routing) needs the environment's
+`draftVersionID` — from `voiceflow_project.get` → `environments[].draftVersionID` —
+passed as `environmentID`. Do NOT pass the environment `id`; it fails with
+`Version does not exist`. (`voiceflow_environment.*` ops are the exception — they take
+the real environment id.)
+
 1. Create the project via `voiceflow_project`
 2. Set global prompt (persona + guidelines) via `voiceflow_global_prompt`
 3. Create playbooks via `voiceflow_playbook`

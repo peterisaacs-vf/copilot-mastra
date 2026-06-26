@@ -42,6 +42,7 @@ const DEFAULT_MAX_STEPS = 12;
 export const LIVE_TOOL_REFERENCE = [
   '# Live Voiceflow MCP tools',
   'Your tools come from the Voiceflow MCP, namespaced voiceflow_*. Each takes an `operation` parameter.',
+  'CRITICAL — environmentID: for every draft-editing tool (global_prompt, agent_instructions, routing, playbook, workflow, function, variable, …) the `environmentID` argument MUST be the project DRAFT VERSION ID. Get it from voiceflow_project.get → environments[Main].draftVersionID and pass THAT as environmentID. Do NOT pass the environment id (environments[].id) — it fails with "Version does not exist". (voiceflow_environment.* ops are the exception: they operate on environments and take the real environment id.)',
   'Key tools/ops:',
   '- voiceflow_project (list|get|get_api_key|export), voiceflow_environment (list|get|clone|publish|merge|compile)',
   '- voiceflow_playbook (list|get|create|update), voiceflow_global_prompt (get|update), voiceflow_agent_instructions (get|update), voiceflow_routing',

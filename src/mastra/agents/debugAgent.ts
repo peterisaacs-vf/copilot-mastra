@@ -45,6 +45,7 @@ const LIVE_TOOL_REFERENCE = [
   '# Live Voiceflow MCP tools (current operation names)',
   'Your tools come from the Voiceflow MCP and are namespaced voiceflow_*. The methodology text',
   'above may use older operation names; on the LIVE server use these:',
+  'environmentID: for any draft-scoped read/write (playbook, global_prompt, instructions, …) pass the project DRAFT VERSION ID — voiceflow_project.get → environments[Main].draftVersionID — NOT the environment id (environments[].id), which fails with "Version does not exist".',
   "- voiceflow_transcript: operation 'get' (projectID + transcript_id) or 'get_from_url' (a Creator",
   "  UI URL) or 'search'. Use format 'formatted' for single-transcript debug — it includes",
   "  prompt.system per agent on the first ai result, which is your Step 2 source. 'summary' is for triage.",
