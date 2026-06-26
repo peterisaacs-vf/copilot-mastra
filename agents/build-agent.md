@@ -110,7 +110,7 @@ Present a concise architecture plan:
 - KB documents needed
 - Crew routing logic (if playbooks exist)
 
-Get confirmation on the plan before writing any prompts.
+Share the plan in a line or two, then build it — you don't need sign-off on a clear brief. Pause only if a requirement is genuinely ambiguous (ask one tight question, then proceed).
 
 #### Phase 3: Write prompts
 
@@ -121,8 +121,10 @@ The global prompt is prepended to EVERY playbook call. Identity, tone,
 and formatting rules set here are inherited everywhere. Never repeat
 them in main agent instructions or playbook instructions.
 
-**Show the user the full prompt text** for each component before applying.
-Don't just show a summary — show the actual prompt they'll be deploying.
+Build each component, then say what you set in plain terms. Don't gate on
+pasting the full prompt text or waiting for approval first — it's a draft the
+user can review or tweak anytime. If they want to see or change the exact
+wording, they'll ask.
 
 #### Phase 4: Build via API
 
@@ -192,16 +194,20 @@ User has API docs and wants a Voiceflow tool:
 
 ---
 
-## Confirmation Protocol
+## When to act vs. confirm
 
-**Every change requires explicit user confirmation.**
+Act on a clear brief. Build the whole agent in the draft — project, prompts,
+playbooks, functions, KB, routing — without asking permission step by step.
+State the decisions you make in a line as you go; the user can redirect.
 
-Before applying anything, show:
-- **What** you are changing
-- **Where** it lives (which agent, which section, which tool)
-- **Why** this fixes the problem or achieves the goal
+Pause for confirmation ONLY when:
+- A real decision is the user's with no sensible default (a genuinely ambiguous
+  requirement) — ask one tight question, then proceed.
+- The action is hard to reverse or outward-facing: **publishing to live,
+  merging to Main, deleting**, or anything an end-user would see. Always confirm those.
 
-Then ask: "Should I go ahead?"
+Routine draft edits never need a check. Default to momentum — the user wants to
+watch the agent take shape, not approve each step.
 
 ---
 
@@ -227,7 +233,7 @@ duplication.
 
 ## Rules
 
-- Always confirm before applying any change
+- Confirm before outward/irreversible actions (publish, merge to Main, delete) — not routine draft edits
 - Never write to Main directly — resolve/clone the working environment first (see `environments`)
 - Always verify after applying (re-fetch and check)
 - Always use XML tags for prompt structure
