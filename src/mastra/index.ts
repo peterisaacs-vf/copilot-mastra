@@ -11,7 +11,8 @@ import type { Memory } from '@mastra/memory';
 import { VercelDeployer } from '@mastra/deployer-vercel';
 import { registerApiRoute } from '@mastra/core/server';
 import { MastraEditor } from '@mastra/editor';
-import { getPostgresUrl, makePostgresStore, makeLibsqlStore, probePgvector } from './storage';
+import { Client } from 'pg';
+import { getPostgresUrl, makePostgresStore, makeLibsqlStore, probePgvector, PG_SSL } from './storage';
 import { pgMemory, localMemory, CONTEXT_TOKEN_BUDGET, OBSERVATIONAL_MEMORY } from './memory';
 import { skillRoutingScorer } from './scorers/skillRouting';
 import { skillRoutingJudgeScorer } from './scorers/skillRoutingJudge';
@@ -188,6 +189,63 @@ export const mastra = new Mastra({
       registerApiRoute('/_diag/mcp', {
         method: 'GET',
         handler: async (c) => c.json(mcpDiag),
+      }),
+      // Admin: wipe ALL conversation memory (threads, messages, working memory,
+      // observational memory, thread state, and semantic-recall vectors) for a clean
+      // demo. Preserves oauth_kv (MCP auth) and agent/editor/skill config. Gated by
+      // ?confirm=yes. Discovers pgvector recall tables dynamically so nothing is missed.
+      registerApiRoute('/_diag/reset-memory', {
+        method: 'GET',
+        handler: async (c) => {
+          if (c.req.query('confirm') !== 'yes') {
+            return c.text(
+              'Add ?confirm=yes to wipe ALL conversation memory (threads, messages, working ' +
+                'memory, observational memory, semantic-recall vectors). Auth tokens and agent ' +
+                'config are preserved.',
+              400,
+            );
+          }
+          const url = getPostgresUrl();
+          if (!url) return c.json({ ok: false, error: 'No Postgres configured (memory is on /tmp libsql).' }, 400);
+          const client = new Client({ connectionString: url, ssl: PG_SSL, connectionTimeoutMillis: 10_000 });
+          const cleared: Record<string, number> = {};
+          try {
+            await client.connect();
+            const present = new Set(
+              (await client.query("SELECT table_name FROM information_schema.tables WHERE table_schema='public'")).rows.map(
+                (r: any) => r.table_name,
+              ),
+            );
+            // Memory tables + any pgvector (semantic-recall embedding) tables.
+            const memTables = [
+              'mastra_messages',
+              'mastra_threads',
+              'mastra_resources',
+              'mastra_observational_memory',
+              'mastra_thread_state',
+            ];
+            const vecTables = (
+              await client.query("SELECT DISTINCT table_name FROM information_schema.columns WHERE table_schema='public' AND udt_name='vector'")
+            ).rows.map((r: any) => r.table_name);
+            const PRESERVE = new Set(['oauth_kv']);
+            const toClear = [...new Set([...memTables, ...vecTables])].filter((t) => present.has(t) && !PRESERVE.has(t));
+            for (const t of toClear) {
+              cleared[t] = (await client.query(`SELECT count(*)::int AS n FROM "${t}"`)).rows[0].n;
+            }
+            if (toClear.length) {
+              await client.query(`TRUNCATE TABLE ${toClear.map((t) => `"${t}"`).join(', ')} CASCADE`);
+            }
+            return c.json({ ok: true, cleared, preserved: ['oauth_kv', 'agent/editor/skill config'] });
+          } catch (e: any) {
+            return c.json({ ok: false, error: e?.message ?? String(e), cleared }, 500);
+          } finally {
+            try {
+              await client.end();
+            } catch {
+              /* ignore */
+            }
+          }
+        },
       }),
       // Deep, on-demand OAuth probe: decodes the stored token, tests it against the
       // MCP server, and does a manual refresh — pinpoints WHY tools fail to load.
