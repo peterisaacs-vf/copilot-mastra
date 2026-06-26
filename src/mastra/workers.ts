@@ -59,6 +59,21 @@ export const LIVE_TOOL_REFERENCE = [
   'never write to Main directly (clone/use a working environment); always verify after applying.',
 ].join('\n');
 
+/**
+ * Shared user-facing communication style. The copilot UI shows reasoning and tool calls
+ * separately from the chat, so the agent's WRITTEN messages are the product voice — they
+ * must read like a product walking someone through a build, not an operations log.
+ */
+export const COMMS_STYLE = [
+  '# Talking to the user',
+  'Your reasoning and tool calls are shown separately in the UI — your written messages are the product voice. Keep them clean and human:',
+  '- NEVER print raw IDs in your messages: projectID, environmentID, draftVersionID, versionID, playbookID, documentID, functionID, toolCallId, API keys, etc. Refer to things by human name — "the project", "the Play Trivia playbook", "the knowledge base", "the booking function".',
+  '- Do NOT narrate internal mechanics: captureResponse, pathOrder, "the field expects an array", path registration, draft-vs-environment IDs, compile internals, tool/operation names. Describe what you did in plain product terms — e.g. "created the booking playbook and connected it to the function", not "called voiceflow_tool.create with captureResponse".',
+  '- Do NOT paste low-level errors, validation messages, or stack traces. If something failed and you handled it yourself, either stay silent or say it in one plain phrase ("fixed a small wiring issue"). Only surface a problem the user actually needs to act on.',
+  '- Keep build narration tight and skimmable: what you just did, what is next. A short heading, a small table, or a few bullets is great — the UI renders markdown. Save IDs and full technical detail for when the user explicitly asks for them.',
+  '- Default to brevity. The user wants to see an agent taking shape, not a transcript of API operations.',
+].join('\n');
+
 /** Instructions = agent .md body + a skill-loading preamble + the live tool reference.
  *  Skill BODIES are no longer injected — they're loaded on demand via the workspace skill tools. */
 function instructionsFor(spec: { agentFile: string; skills: string[] }): string {
@@ -71,7 +86,7 @@ function instructionsFor(spec: { agentFile: string; skills: string[] }): string 
         'Use `skill_search` to discover other relevant skills (e.g. environments, wiring-architect, prompting, knowledge-base) and `skill_read` for a skill’s reference files. Do not work from memory — load the skill.',
       ].join('\n')
     : '';
-  return [body, skillNote, `\n\n---\n\n${LIVE_TOOL_REFERENCE}`].join('');
+  return [body, skillNote, `\n\n---\n\n${LIVE_TOOL_REFERENCE}`, `\n\n---\n\n${COMMS_STYLE}`].join('');
 }
 
 /** Build a synchronous worker agent from its .md + model tier, with the shared skill workspace. */
@@ -119,7 +134,7 @@ export function buildOrchestrator(
     name: 'orchestrator',
     description:
       'Voiceflow copilot supervisor. Routes requests to specialized workers (build, debug, review, audit-kb, setup-evals, test-runner).',
-    instructions: loadMarkdownBody('agents/orchestrator.md'),
+    instructions: `${loadMarkdownBody('agents/orchestrator.md')}\n\n---\n\n${COMMS_STYLE}`,
     model: mainModel,
     tools: async (ctx: any) => ({ ...(await vfTools(ctx)) }),
     agents,
