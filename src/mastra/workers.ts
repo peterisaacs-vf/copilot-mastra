@@ -2,9 +2,29 @@ import { Agent } from '@mastra/core/agent';
 import type { Workspace } from '@mastra/core/workspace';
 import type { Memory } from '@mastra/memory';
 import { loadMarkdownBody } from '../lib/loadPrompt';
+import {
+  taskWriteTool,
+  taskUpdateTool,
+  taskCompleteTool,
+  taskCheckTool,
+  TaskStateProcessor,
+} from '@mastra/core/tools';
 import { makeContextProcessors } from './memory';
 import { makeStreamSlimmer } from './streamSlimmer';
 import { mainModel, triageModel } from './models';
+
+/**
+ * Mastra's native live to-do list. Attached to workers that do complex multi-step work so
+ * they can lay out a plan and tick it off as they go. The list is published as a `tasks`
+ * state signal (streams to the client as `data-tasks`, survives memory truncation) via the
+ * TaskStateProcessor below; the /demo widget renders it as a live checklist.
+ */
+const TASK_TOOLS = {
+  task_write: taskWriteTool,
+  task_update: taskUpdateTool,
+  task_complete: taskCompleteTool,
+  task_check: taskCheckTool,
+} as const;
 import { loadPromptingGuideTool } from '../tools/promptingGuide';
 import { diffPromptsTool } from '../tools/diffPrompts';
 import { resolveToolsArg, type ToolsArg } from './dynamicTools';
@@ -26,6 +46,8 @@ export interface WorkerSpec {
   maxTokens?: number;
   /** Local (non-MCP) createTool tools to attach, keyed by tool name. */
   localTools?: Record<string, unknown>;
+  /** Attach Mastra's native live to-do list (task tools + state processor) for multi-step work. */
+  tasks?: boolean;
 }
 
 const TIER_MODEL: Record<Tier, typeof mainModel> = {
@@ -121,11 +143,19 @@ export function buildWorker(
     description: spec.description,
     instructions: instructionsFor(spec),
     model: TIER_MODEL[spec.tier],
-    tools: async (ctx: any) => ({ ...(await vfTools(ctx)), ...(spec.localTools ?? {}) }),
+    tools: async (ctx: any) => ({
+      ...(await vfTools(ctx)),
+      ...(spec.localTools ?? {}),
+      ...(spec.tasks ? TASK_TOOLS : {}),
+    }),
     workspace,
     memory,
     // Token-budget the assembled context (window + recall + working memory) at every step.
-    inputProcessors: makeContextProcessors(),
+    // When the worker keeps a task list, publish it as a `tasks` state signal so it persists
+    // across turns and streams to the UI as a live checklist.
+    inputProcessors: spec.tasks
+      ? [...makeContextProcessors(), new TaskStateProcessor()]
+      : makeContextProcessors(),
     defaultOptions: {
       maxSteps: DEFAULT_MAX_STEPS,
       modelSettings: { maxOutputTokens: spec.maxTokens ?? DEFAULT_MAX_TOKENS },
@@ -185,6 +215,7 @@ export const WORKER_SPECS: WorkerSpec[] = [
     skills: ['build-agent', 'document'],
     tier: 'main',
     localTools: { loadPromptingGuide: loadPromptingGuideTool, diffPrompts: diffPromptsTool },
+    tasks: true,
   },
   {
     key: 'review-agent',
