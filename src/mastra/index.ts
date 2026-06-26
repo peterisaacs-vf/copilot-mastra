@@ -335,10 +335,13 @@ export const mastra = new Mastra({
   // in `storage`). Durable with Postgres; ephemeral on the /tmp fallback.
   editor: new MastraEditor(),
   // Build-time only: emits a Vercel Build Output API bundle (with the Studio SPA).
-  // maxDuration is env-driven so it can be tuned to the target plan's ceiling
-  // (Hobby 60s / Pro 300s) — agent runs are long, so give them as long as allowed.
+  // Agent runs are long — a full agent build makes many sequential MCP calls — so
+  // give the function as long as the plan allows. Default 600s (10 min); override
+  // via VERCEL_FN_MAX_DURATION. Ceilings: with Fluid Compute, Pro/Enterprise allow
+  // up to 800s; without Fluid, Pro caps at 300s. If a deploy errors on maxDuration,
+  // enable Fluid Compute for the project or set VERCEL_FN_MAX_DURATION=300.
   deployer: new VercelDeployer({
     studio: true,
-    maxDuration: Number(process.env.VERCEL_FN_MAX_DURATION ?? 300),
+    maxDuration: Number(process.env.VERCEL_FN_MAX_DURATION ?? 600),
   }),
 });
