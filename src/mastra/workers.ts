@@ -33,7 +33,12 @@ const TIER_MODEL: Record<Tier, typeof mainModel> = {
 };
 
 const DEFAULT_MAX_TOKENS = 8000;
-const DEFAULT_MAX_STEPS = 12;
+// Tool-step budget per agent run. A full one-shot build (project + global prompt + KB
+// docs + playbook + functions + routing + compile, plus a few retries) needs well over
+// a dozen tool calls, so 12 capped it mid-build ("reached maxSteps while tool calls were
+// still pending"). 40 gives ample headroom; the 600s function timeout + per-step
+// maxOutputTokens remain the real runaway backstops. Override via AGENT_MAX_STEPS.
+const DEFAULT_MAX_STEPS = Number(process.env.AGENT_MAX_STEPS ?? 40);
 
 /**
  * Shared grounding. The plugin methodology sometimes uses older MCP op names;
