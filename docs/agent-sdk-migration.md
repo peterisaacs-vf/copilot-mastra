@@ -67,6 +67,47 @@ exactly the features that make context management cheap — so more of that fall
 - Verify which SDK features survive on GLM: prompt caching (no), compaction (no), memory
   tool (test), tool streaming (test), computer use / extended thinking (Anthropic-only, N/A).
 
+## TypeScript SDK & porting our tools (verified: code.claude.com/docs/en/agent-sdk/custom-tools)
+
+The Agent SDK is **first-class TypeScript** — use it, not Python (and TS is actually *better*
+here: `structuredContent` works from an in-process TS tool server but NOT from Python's
+in-process `@tool`).
+
+- **Package:** `@anthropic-ai/claude-agent-sdk`. Run an agent with `query({ prompt, options })`
+  (async iterable of messages; final one is `type: "result"`).
+- **Define a tool:** `tool(name, description, zodFields, handler, annotations?)`. Schemas are
+  **Zod** (pass the raw field object, e.g. `{ tasks: z.array(...) }`, not `z.object({...})`);
+  `args` are typed from it automatically. Handler returns an **MCP result**:
+  `{ content: [{ type: "text", text }], structuredContent?, isError? }`.
+- **Register:** bundle tools in `createSdkMcpServer({ name, version, tools: [...] })`, pass via
+  `query({ options: { mcpServers: { plan: server }, allowedTools: ["mcp__plan__update_plan"] } })`.
+  Tool names exposed to the model are `mcp__{server}__{tool}`.
+
+**Our 4 tools port as a light re-housing — Zod schema + async logic carry over.** Three deltas:
+1. Wrapper: `createTool({id, description, inputSchema, execute})` → `tool(name, description, zodFields, handler)` + `createSdkMcpServer`.
+2. Return shape: arbitrary object → MCP blocks. e.g. `grep_transcripts`'s `{hits}` becomes
+   `{ content: [{type:"text", text: summary}], structuredContent: { hits } }`.
+3. Errors: return `isError: true` (don't throw — an uncaught throw stops the whole agent loop).
+
+```ts
+// update_plan, ported:
+import { tool, createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
+const updatePlan = tool(
+  "update_plan", "Maintain a live checklist for multi-step work.",
+  { tasks: z.array(z.object({ content: z.string(), status: z.enum(["pending","in_progress","completed"]) })) },
+  async ({ tasks }) => ({
+    content: [{ type: "text", text: `Plan: ${tasks.length} steps` }],
+    structuredContent: { tasks },
+  })
+);
+const planServer = createSdkMcpServer({ name: "plan", version: "1.0.0", tools: [updatePlan] });
+```
+
+Semantic recall / `grep_transcripts` follow the same shape (an in-process MCP tool over our
+pgvector / the VF transcript API). `.describe()` adds field docs the model sees; `.default()`
+makes a field optional; `z.enum()` for enums; `readOnlyHint: true` lets read-only tools run in parallel.
+
 ## POC — verify these two before committing to the full migration
 
 1. **GLM drives the Agent SDK cleanly through LiteLLM** — a basic query + a tool call +
@@ -117,9 +158,11 @@ If both hold, the rest is mechanical.
 
 ## Suggested first steps in the new repo
 
-1. Minimal Agent SDK app (TypeScript, to reuse our tool + parsing logic) → LiteLLM(Fireworks/GLM)
-   → one query. Prove GLM drives the SDK.
+1. Minimal Agent SDK app: `npm i @anthropic-ai/claude-agent-sdk zod` (TypeScript, to reuse our
+   tool + parsing logic), `query({ prompt, options })` → LiteLLM(Fireworks/GLM) via
+   `ANTHROPIC_BASE_URL`. Prove GLM drives the SDK.
 2. Wire the Voiceflow MCP (port the OAuth flow + the env-id workaround from `oauth.ts`).
-3. Add `grep_transcripts` as an in-process MCP tool + a resumed session + one recall tool. Prove memory.
+3. Port `grep_transcripts` to a `tool()` in an in-process `createSdkMcpServer` (see *TypeScript
+   SDK & porting our tools* above) + a resumed session + one recall tool. Prove memory.
 4. Then port the prompts/skills and re-express the orchestrator/worker structure in the SDK's
    agent/handoff model; rebuild the `/demo` widget parser against the SDK's event schema.
