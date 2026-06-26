@@ -491,8 +491,11 @@ function fixOutgoingBody(body: unknown): unknown {
     // a non-Main environment's draft, and no-ops safely when the project is uncached.
     let envChanged = false;
     const op = bareToolName(String(rpc?.params?.name ?? ''));
+    // `environment.compile` is the one environment op that ALSO wants the
+    // draftVersionID; clone/publish/merge correctly take the real env id.
+    const wantsDraft = DRAFT_EDIT_OPS.has(op) || (op === 'environment' && args?.operation === 'compile');
     if (
-      DRAFT_EDIT_OPS.has(op) &&
+      wantsDraft &&
       typeof args.projectID === 'string' &&
       typeof args.environmentID === 'string'
     ) {
