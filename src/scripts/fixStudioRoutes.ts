@@ -32,6 +32,7 @@ cfg.routes = [
   { src: '/health', dest: '/' },
   { src: '/_diag/(.*)', dest: '/' },
   { src: '/oauth/(.*)', dest: '/' },
+  { src: '/demo', dest: '/' },
   { handle: 'filesystem' },
   { src: '/(.*)', dest: '/index.html' },
 ];
