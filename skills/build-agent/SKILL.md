@@ -5,7 +5,8 @@ description: >
   prompt engineering, tool design, function code, knowledge base strategy,
   multi-agent swarms, and channel-specific patterns (voice and chat).
   TRIGGER when: user asks to build a new agent, design an agent from scratch,
-  or do a full agent build with multiple components.
+  do a full agent build with multiple components, or add/create/configure an
+  individual playbook or workflow.
 version: 0.1.0
 ---
 
@@ -18,6 +19,13 @@ individual components, see the composable skills: `prompting`,
 ---
 
 ## Build from Scratch — Guided Workflow
+
+**Pace it — one step per turn.** When building against a live workspace, create
+artifacts incrementally: one major step per response (project → global prompt →
+main agent instructions → each playbook → KB docs → each function → wiring → tests).
+NEVER attempt the entire build in a single turn — a turn is capped at ~5 minutes,
+so batching every create call into one response will time out mid-build. After each
+step, say what you created and what's next, then continue.
 
 ### Phase 1: Discovery
 
@@ -56,17 +64,21 @@ Apply the **playbook test**:
 **Create a playbook ONLY when:**
 - Distinct multi-step flow (booking, ordering, onboarding)
 - Needs functions or API tools
-- Own rules that would clutter the operator prompt
+- Own rules that would clutter the main agent instructions
 
-**Keep on the operator when:**
-- Answering questions (use KB on the operator)
+**Keep in the main agent when:**
+- Answering questions (use KB on the main agent)
 - No tools beyond KB/web search
 - Would just be a thin wrapper around a KB query
 
 **The test:** If a playbook's only tool is the Knowledge Base, it
 should NOT be a playbook.
 
-Present: agent pattern, what the operator handles, which playbooks
+Apply this test BEFORE naming playbooks anywhere — including a quick
+build overview or plan. Don't propose an FAQ/Q&A playbook and then
+retract it; KB-only Q&A always lives on the main agent.
+
+Present: agent pattern, what the main agent handles, which playbooks
 and why, functions needed, KB documents needed, crew routing logic.
 
 Get confirmation before writing any prompts.
@@ -80,6 +92,15 @@ playbook instructions.
 **Show the user the full prompt text** before applying. Not a summary.
 
 ### Phase 4: Build via API
+
+**Resolve `environmentID` from `voiceflow_project.get` before any draft-editing call**
+(global prompt, instructions, playbooks, functions, variables, routing):
+- **v1.3 projects** (have an `environments` map) → use `environments[].draftVersionID`.
+- **v1.2 projects** (have `devVersion`/`liveVersion`) → use `devVersion` (or `activeEnvironmentID`).
+
+Never pass the environment `id` or the alias `"development"` — they fail with
+`Version does not exist` / a 500. (`voiceflow_environment.*` ops are the exception —
+they take the real environment id.)
 
 1. Create the project via `voiceflow_project`
 2. Set global prompt (persona + guidelines) via `voiceflow_global_prompt`
@@ -110,11 +131,11 @@ details on structure and anti-patterns.
 
 | Content Type | Where It Goes | Why |
 |-------------|---------------|-----|
-| Identity, role, name | Global Prompt > Persona | Applies everywhere |
-| Primary objective | Global Prompt > Goal | Anchors all decisions |
-| Communication style | Global Prompt > Tone | Consistent across playbooks |
-| Safety rules | Global Prompt > Guidelines | Non-negotiable everywhere |
-| Routing logic | Global Agent > Instructions | Only the router needs this |
+| Identity, role, name | Global Prompt | Applies everywhere |
+| Primary objective | Global Prompt | Anchors all decisions |
+| Communication style | Global Prompt | Consistent across playbooks |
+| Safety rules | Global Prompt | Non-negotiable everywhere |
+| Routing logic | Main Agent Instructions | Only the router needs this |
 | Task procedures | Playbook > Instructions | Only this playbook needs this |
 | Reference data | KB or Playbook Instructions | Depends on size and reuse |
 
@@ -264,12 +285,12 @@ SECURITY INSTRUCTIONS (HIGHEST PRIORITY):
 ## Related skills
 
 - **`environments`** — branch-before-build: edit in a cloned working environment, merge to Main on approval. Applies to every edit to an existing agent.
-- **`prompting`** — for global/operator/playbook prompt structure, XML tag conventions, tone rules.
+- **`prompting`** — for global / main agent / playbook prompt structure, XML tag conventions, tone rules.
 - **`functions`** — for the JS code patterns when you write function tools.
 - **`wiring-architect`** — for how function variables, project variables, captureResponse, and tool input defaults connect. Read this BEFORE creating any agent tool — most v4 build errors are wiring errors.
 - **`audit-wiring`** — run this on any project you didn't build yourself to find latent wiring gaps before designing on top.
 - **`knowledge-base`** — when the agent needs grounding from documents.
-- **`agent-architecture`** — for multi-agent setups, operator routing, and playbook architecture.
+- **`agent-architecture`** — for multi-agent setups, main agent routing, and playbook architecture.
 - **`voice`** — voice-specific patterns when the channel is voice.
 - **`prompt-optimizer`** — after deploy, when transcripts show systematic failures.
 - **`document`** — to set up the project wiki for non-code context.

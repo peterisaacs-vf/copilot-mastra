@@ -41,7 +41,7 @@ multiple candidates per round, Pareto-selected for quality vs brevity.
 
 Ask the user:
 - **Which project?** (list with `voiceflow_project`)
-- **Which agent/playbook?** (e.g., "the operator", "payments agent")
+- **Which agent/playbook?** (e.g., "the main agent", "payments agent")
 - **How many transcripts?** (default: 50, recommend 30-60)
 
 Then determine:
@@ -58,7 +58,7 @@ Then determine:
 
 **Version detection:**
 - v3: agent names are proper-cased ("Supervisor Agent (V5)", "Account Agent")
-- v4: agent names are "Agent" (operator) or snake_case ("new_customer")
+- v4: agent names are "Agent" (the main agent) or snake_case ("new_customer")
 
 **v4 global prompt composition:**
 The transcript only contains playbook instructions. The global prompt

@@ -6,6 +6,8 @@ import { extractJsonObject } from '../../lib/extractJson';
 import type { Workspace } from '@mastra/core/workspace';
 import type { Memory } from '@mastra/memory';
 import { makeContextProcessors } from '../memory';
+import { resolveToolsArg, type ToolsArg } from '../dynamicTools';
+import { grepTranscriptsTool } from '../../tools/grepTranscripts';
 
 /**
  * Structured result of a single-transcript debug. Core fields
@@ -44,6 +46,7 @@ const LIVE_TOOL_REFERENCE = [
   '# Live Voiceflow MCP tools (current operation names)',
   'Your tools come from the Voiceflow MCP and are namespaced voiceflow_*. The methodology text',
   'above may use older operation names; on the LIVE server use these:',
+  'environmentID: for any draft-scoped read/write (playbook, global_prompt, instructions, …) resolve via voiceflow_project.get — v1.3 → environments[Main].draftVersionID; v1.2 → devVersion/activeEnvironmentID. Never the environment id (environments[].id) or alias "development" (they fail with "Version does not exist" / 500).',
   "- voiceflow_transcript: operation 'get' (projectID + transcript_id) or 'get_from_url' (a Creator",
   "  UI URL) or 'search'. Use format 'formatted' for single-transcript debug — it includes",
   "  prompt.system per agent on the first ai result, which is your Step 2 source. 'summary' is for triage.",
@@ -96,17 +99,18 @@ export const DEBUG_MAX_STEPS = 12;
 export const DEBUG_MAX_TOKENS = 8000;
 
 export function buildDebugAgent(
-  tools: Record<string, any> = {},
+  tools: ToolsArg = {},
   workspace?: Workspace,
   memory?: Memory,
 ): Agent {
+  const vfTools = resolveToolsArg(tools);
   return new Agent({
     id: 'debug-agent',
     name: 'debug-agent',
     description: DEBUG_AGENT_DESCRIPTION,
     instructions: buildDebugInstructions(),
     model: mainModel,
-    tools,
+    tools: async (ctx: any) => ({ ...(await vfTools(ctx)), grep_transcripts: grepTranscriptsTool }),
     workspace,
     memory,
     inputProcessors: makeContextProcessors(),

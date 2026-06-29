@@ -2,10 +2,10 @@
 name: agent-architecture
 description: >
   Multi-agent swarm architecture for Voiceflow. Covers the three-layer
-  architecture (global prompt, operator, playbooks), routing patterns,
+  architecture (global prompt, main agent instructions, playbooks), routing patterns,
   variable flow, and common anti-patterns.
   TRIGGER when: user asks about crew setup, multi-agent routing, playbook
-  architecture, operator configuration, global prompt vs operator vs
+  architecture, main agent configuration, global prompt vs main agent vs
   playbook layers, transferring between playbooks, "how should I split
   my agent into pieces", or designing the routing logic for a v4 agent.
 version: 0.1.0
@@ -23,7 +23,7 @@ version: 0.1.0
 +-----------------------------------------------------+
                           |
 +-----------------------------------------------------+
-|              GLOBAL AGENT (Operator)                  |
+|              MAIN AGENT                               |
 |   Routing + direct Q&A handling                      |
 |   Has: KB, web search, visual tools                  |
 |   Handles simple queries directly via KB             |
@@ -46,7 +46,7 @@ Defines WHO the agent is. Applied to every agent.
 Contains: Identity, voice rules, tone, universal guardrails.
 Does NOT contain: Routing logic, playbook-specific instructions.
 
-### Layer 2: Global Agent (Operator)
+### Layer 2: Main agent
 Entry point. Handles simple queries directly, routes complex flows.
 Has: KB, web search, buttons, cards, carousels, end tool.
 Does NOT have: Functions, API tools, MCP tools.
@@ -60,7 +60,7 @@ Key Rule: Entry point must acknowledge what user already said.
 **Visibility:** When a playbook is active, only the global prompt and
 *that* playbook's instructions are in context. Other playbooks'
 instructions are NOT visible. So the only signal another playbook
-(or the operator) has for "when should I jump here?" is this
+(or the main agent) has for "when should I jump here?" is this
 playbook's `description` field — which means the description must
 contain **both what the playbook does and when to route to it**.
 The same applies to every tool and workflow description. See the
@@ -100,22 +100,22 @@ Account playbook: "I can help with that license update..."
 ### When to Create a Playbook
 
 **Create when:** Distinct multi-step flow, needs functions/APIs,
-own rules that would clutter operator.
+own rules that would clutter the main agent instructions.
 
-**Keep on operator when:** Just answering questions (use KB), no tools
+**Keep in the main agent when:** Just answering questions (use KB), no tools
 beyond KB/web search, would be a thin KB wrapper.
 
 **The test:** If a playbook's only tool is KB, it shouldn't be a playbook.
 
 ```
 WRONG:
-Operator (router only, no KB)
+Main agent (router only, no KB)
 +-- Menu FAQ Playbook (KB only)
 +-- Hours Playbook (KB only)
 +-- Ordering Playbook (has functions)
 
 RIGHT:
-Operator (KB enabled — handles menu, hours, FAQ directly)
+Main agent (KB enabled — handles menu, hours, FAQ directly)
 +-- Ordering Playbook (has place_order function)
 ```
 
@@ -159,6 +159,6 @@ Global Prompt / Playbooks (reference [logical_name] in body)
 ## Related skills
 
 - **`build-agent`** — the parent skill for full agent builds; crew is one component.
-- **`prompting`** — global/operator/playbook prompt structure pairs with crew architecture.
+- **`prompting`** — global / main agent / playbook prompt structure pairs with crew architecture.
 - **`wiring-architect`** — once you have the crew shape, the per-tool wiring (`captureResponse`, `shouldFulfill`, defaults) lives there.
 - **`voiceflow-overview`** — index of all available skills.

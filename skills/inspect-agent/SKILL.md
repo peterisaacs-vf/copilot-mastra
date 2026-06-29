@@ -41,7 +41,7 @@ Read in parallel:
    - Built-in tool configs (KB, web search, buttons, cards, carousel, end, call forward)
 
 3. **Global Crew Settings** (`voiceflow_agent_routing` (list))
-   - Operator agent ID and description
+   - Main agent ID and description
    - Sub-agents with descriptions
    - Sub-flows with descriptions
 
@@ -99,13 +99,13 @@ Chat: {model} | Voice: {model} | Realtime: {model}
 - Failure message: {message}
 
 ## Crew Configuration
-Operator: {agent name} ({agent ID})
+Main agent: {agent name} ({agent ID})
 Sub-agents:
 - {name}: {description}
 - {name}: {description}
 
 ## Agents ({count})
-### {Agent Name} (operator)
+### {Agent Name} (main agent)
 - Model: {model}
 - Instructions: {char count} chars
 {full instructions text}
@@ -141,7 +141,7 @@ Sub-agents:
 | {name} | {datatype} | {yes/no} | {yes/no} | {value} | {desc} |
 
 ## Summary
-- {count} agents ({count} playbooks + operator)
+- {count} agents ({count} playbooks + main agent)
 - {count} functions
 - {count} function tool links
 - {count} API tools

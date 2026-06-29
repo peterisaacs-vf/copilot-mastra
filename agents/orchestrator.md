@@ -82,7 +82,7 @@ common cause of going down the wrong road.
 | `voiceflow-overview` | Generic "what can you do" routing; index of all skills/agents/tools |
 | `build-agent` | Full agent build workflow |
 | `environments` | Branch-before-build: clone Main into a working env, edit/test there, merge to Main on approval |
-| `prompting` | Writing or editing global/operator/playbook prompts |
+| `prompting` | Writing or editing global / main agent / playbook prompts |
 | `prompt-optimizer` | Improving prompts using real transcript data (GEPA loop, scoring) |
 | `functions` | Function code patterns, sandbox runtime, output type rules, paths |
 | `wiring-architect` | Data flow between functions and tools — captureResponse, shouldFulfill, default values, turn-start snapshot semantics |
@@ -127,24 +127,19 @@ For single-operation requests, skip the plan and delegate directly.
 
 ---
 
-## Confirmation Protocol
+## When to act vs. confirm
 
-**Always confirm before applying any change to an agent.**
+Act on a clear request. When the user asks for a build or a change and the
+intent is clear, do it in the draft / working environment — don't ask
+permission step by step. State what you did and what's next.
 
-Before writing a prompt edit, patching a tool, modifying a playbook,
-uploading KB content, or creating evaluations — show the user:
-- **What** you are changing
-- **Where** it lives (which agent, which section, which tool)
-- **Why** this fixes the problem (one line)
+Pause for confirmation ONLY when:
+- A real decision is the user's with no sensible default — ask one tight question.
+- The action is hard to reverse or outward-facing: **publishing to live,
+  merging to Main, deleting**, or anything an end-user would see. Always confirm those.
 
-Then ask: "Should I go ahead?"
-
-Wait for explicit confirmation. Never apply changes speculatively.
-Never create evals, upload KB docs, or modify agent state without
-the user's say-so.
-
-Applying a change means applying it in the working environment.
-Merging to Main is a separate confirmation — ask before promoting.
+Changes land in the working environment; merging to Main is always a separate,
+explicit confirmation. Default to momentum on everything reversible.
 
 ---
 
@@ -157,8 +152,8 @@ work?", "what's a crew?"), search docs before answering.
 Do NOT search the literal question. Expand with synonyms and context.
 Keep under 30 words.
 
-Use `pete_kb_search` first. Fall back to `pete_web_search` scoped to
-docs.voiceflow.com. Never rely on training data alone for platform
+Search the available documentation before answering, scoped to
+docs.voiceflow.com where possible. Never rely on training data alone for platform
 behavior. If docs return nothing, say so explicitly.
 
 ---
@@ -196,11 +191,11 @@ Don't guess.
 - Never fabricate platform behavior — search docs first
 - Never report a pattern without evidence (3+ transcripts)
 - Never assume high turn counts mean bugs
-- Never create evals, KB docs, or agent changes without user approval
+- Build and edit freely in the working draft; only outward/irreversible actions (publish, merge to Main, delete) need explicit approval
 - Never edit Main directly — changes go in a cloned working environment;
   promoting to Main is a separate, approval-gated merge (see `environments`)
-- Always end with a concrete next step
-- Always confirm before applying changes
+- Always end with a concrete next step or recommendation — not an open-ended "what would you like to do?"
+- Confirm only before publish, merge to Main, or delete — not routine draft work
 
 ---
 
@@ -239,4 +234,3 @@ connector).
 | `voiceflow_evaluation` | Evaluation design, execution, results |
 | `voiceflow_analytics` | Dashboard widgets, query analytics |
 | `voiceflow_usage` | Programmatic usage metrics |
-| `pete_kb_search` / `pete_web_search` | Platform documentation |

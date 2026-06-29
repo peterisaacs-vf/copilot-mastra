@@ -17,3 +17,9 @@ export const mainModel = glmProvider.chatModel(env.glm.modelMain);
 
 /** triage / cheap tier — replaces the plugin's "sonnet" agents (currently same id) */
 export const triageModel = glmProvider.chatModel(env.glm.modelTriage);
+
+/**
+ * Judge tier for eval scorers — a NEUTRAL model (different family from the main/triage
+ * models it scores) to avoid LLM self-preference bias. Default: Kimi K2.6 (Moonshot).
+ */
+export const judgeModel = glmProvider.chatModel(env.glm.modelJudge);

@@ -8,17 +8,20 @@
   },
   "description": "Voiceflow copilot rebuilt on Mastra + GLM (Fireworks). Faithful port of the voiceflow/mcp-plugin.",
   "scripts": {
-    "dev": "mastra dev",
+    "dev": "MASTRA_TELEMETRY_DISABLED=1 mastra dev",
     "generate:assets": "tsx src/scripts/embedAssets.ts",
     "prebuild": "npm run generate:assets",
-    "build": "mastra build",
+    "build": "MASTRA_TELEMETRY_DISABLED=1 mastra build",
     "postbuild": "tsx src/scripts/fixStudioRoutes.ts",
-    "build:studio": "npm run generate:assets && mastra build --studio",
+    "build:studio": "npm run generate:assets && MASTRA_TELEMETRY_DISABLED=1 mastra build --studio",
     "typecheck": "tsc --noEmit",
     "smoke:debug": "tsx src/scripts/debugSmoke.ts",
     "smoke:analyze": "tsx src/scripts/analyzeSmoke.ts",
     "smoke:optimize": "tsx src/scripts/optimizeSmoke.ts",
-    "test:parse": "tsx src/scripts/testParse.ts"
+    "test:parse": "tsx src/scripts/testParse.ts",
+    "audit:wiring": "tsx src/scripts/wiringAudit.ts",
+    "eval:wire": "tsx src/scripts/wireRoutingExperiment.ts",
+    "eval:run": "tsx src/scripts/runRoutingExperiment.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "1.0.41",

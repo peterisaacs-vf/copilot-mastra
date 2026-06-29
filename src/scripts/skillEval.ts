@@ -46,7 +46,7 @@ const CASES: Case[] = [
   { u: 'Should I use one big agent or split it into multiple playbooks?', expect: ['agent-architecture'] },
   // --- generic / routing ---
   { u: 'What can you help me with?', expect: ['voiceflow-overview'] },
-  { u: 'Where do I start?', expect: ['voiceflow-overview'], note: '`start` is not in the orchestrator catalog' },
+  { u: 'Where do I start?', expect: ['start', 'voiceflow-overview'], note: 'either: start (begin session) or overview (catalog)' },
   // --- intentionally ambiguous (exploratory: any sensible pull is fine) ---
   { u: 'My agent is slow and users are dropping off.', expect: ['audit-wiring', 'debug', 'agent-architecture', 'test'], note: 'ambiguous' },
   { u: 'Make my agent better.', expect: ['voiceflow-overview', 'prompt-optimizer', 'build-agent', 'audit-wiring'], note: 'ambiguous' },
@@ -54,11 +54,16 @@ const CASES: Case[] = [
 
 const agent = mastra.getAgent('orchestrator');
 
-type Res = Case & { skills: string[]; searches: string[]; delegations: string[]; hit: boolean; ok: boolean; err?: string };
+type Res = Case & { skills: string[]; searches: string[]; delegations: string[]; hit: boolean; ok: boolean; err?: string; ms: number; inTok: number; outTok: number };
 
 async function runOne(c: Case): Promise<Res> {
+  const t0 = Date.now();
   try {
     const r: any = await agent.generate(c.u, { maxSteps: 4 } as any);
+    const ms = Date.now() - t0;
+    const u = r.usage ?? {};
+    const inTok = u.inputTokens ?? u.promptTokens ?? 0;
+    const outTok = u.outputTokens ?? u.completionTokens ?? 0;
     const skills: string[] = [], searches: string[] = [], delegations: string[] = [];
     (function walk(o: any) {
       if (!o || typeof o !== 'object') return;
@@ -72,9 +77,9 @@ async function runOne(c: Case): Promise<Res> {
       for (const k in o) walk(o[k]);
     })(r);
     const uniq = [...new Set(skills)];
-    return { ...c, skills: uniq, searches: [...new Set(searches)], delegations: [...new Set(delegations)], hit: uniq.some((s) => c.expect.includes(s)), ok: true };
+    return { ...c, skills: uniq, searches: [...new Set(searches)], delegations: [...new Set(delegations)], hit: uniq.some((s) => c.expect.includes(s)), ok: true, ms, inTok, outTok };
   } catch (e: any) {
-    return { ...c, skills: [], searches: [], delegations: [], hit: false, ok: false, err: String(e?.message ?? e).slice(0, 90) };
+    return { ...c, skills: [], searches: [], delegations: [], hit: false, ok: false, err: String(e?.message ?? e).slice(0, 90), ms: Date.now() - t0, inTok: 0, outTok: 0 };
   }
 }
 
@@ -96,7 +101,7 @@ console.log('-'.repeat(104));
 for (const r of results) {
   const loaded = r.skills.length ? r.skills.join(',') : (r.ok ? '(none)' : 'ERR');
   const mark = r.note?.includes('ambiguous') ? (r.skills.length ? '~' : '·') : r.hit ? '✓' : '✗';
-  console.log(pad(r.u, 52) + pad(r.expect.join('|'), 22) + pad(loaded, 22) + mark);
+  console.log(pad(r.u, 52) + pad(r.expect.join('|'), 22) + pad(loaded, 22) + mark + '  ' + String(r.ms).padStart(6) + 'ms');
 }
 
 const scored = results.filter((r) => !r.note?.includes('ambiguous'));
@@ -109,4 +114,16 @@ console.log('\n=== misses (scored) ===');
 for (const r of scored.filter((r) => !r.hit)) console.log(`✗ "${r.u.slice(0, 60)}"  expected ${r.expect.join('|')}  got [${r.skills.join(',') || (r.ok ? 'none' : r.err)}]`);
 console.log('\n=== ambiguous (what it chose) ===');
 for (const r of results.filter((r) => r.note?.includes('ambiguous'))) console.log(`~ "${r.u.slice(0, 50)}"  -> [${r.skills.join(',') || 'none'}]`);
+
+// Performance profile (ok cases only). Latency is dominated by the GLM call; tokens
+// show the per-utterance context cost (system prompt + skill catalog + loads).
+const okRes = results.filter((r) => r.ok);
+const lat = okRes.map((r) => r.ms).sort((a, b) => a - b);
+const q = (x: number) => (lat.length ? lat[Math.min(lat.length - 1, Math.floor(x * lat.length))] : 0);
+const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
+const n = okRes.length || 1;
+console.log('\n=== performance (ok cases) ===');
+console.log(`latency ms: p50=${q(0.5)}  p95=${q(0.95)}  max=${lat[lat.length - 1] ?? 0}  avg=${Math.round(sum(lat) / n)}`);
+console.log(`tokens total: in=${sum(okRes.map((r) => r.inTok))}  out=${sum(okRes.map((r) => r.outTok))}`);
+console.log(`tokens avg/call: in=${Math.round(sum(okRes.map((r) => r.inTok)) / n)}  out=${Math.round(sum(okRes.map((r) => r.outTok)) / n)}`);
 process.exit(0);

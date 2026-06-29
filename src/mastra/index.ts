@@ -10,11 +10,16 @@ import type { MastraStorage } from '@mastra/core/storage';
 import type { Memory } from '@mastra/memory';
 import { VercelDeployer } from '@mastra/deployer-vercel';
 import { registerApiRoute } from '@mastra/core/server';
+import { DEMO_HTML } from './demoPage';
+import { grepTranscriptsTool } from '../tools/grepTranscripts';
 import { MastraEditor } from '@mastra/editor';
-import { getPostgresUrl, makePostgresStore, makeLibsqlStore, probePgvector } from './storage';
+import { Client } from 'pg';
+import { getPostgresUrl, makePostgresStore, makeLibsqlStore, probePgvector, PG_SSL } from './storage';
 import { pgMemory, localMemory, CONTEXT_TOKEN_BUDGET, OBSERVATIONAL_MEMORY } from './memory';
-import { hasVoiceflowToken, hasGlmKey, useVoiceflowOAuth } from '../config/env';
-import { beginVoiceflowAuthorization, completeVoiceflowAuthorization, hasVoiceflowTokens } from './oauth';
+import { skillRoutingScorer } from './scorers/skillRouting';
+import { skillRoutingJudgeScorer } from './scorers/skillRoutingJudge';
+import { hasVoiceflowToken, hasGlmKey, useVoiceflowOAuth, env } from '../config/env';
+import { beginVoiceflowAuthorization, completeVoiceflowAuthorization, hasVoiceflowTokens, resetVoiceflowOAuth, probeVoiceflowMcp, resetVoiceflowTokenCache } from './oauth';
 
 if (!hasGlmKey()) {
   console.warn(
@@ -26,26 +31,61 @@ if (!hasGlmKey()) {
 // Voiceflow MCP tools — graceful no-token fallback so Studio still boots.
 // mcpDiag is surfaced via GET /_diag/mcp so we can confirm the MCP is wired
 // (token present + tools loaded) with a single curl instead of reading logs.
-let vfTools: Record<string, any> = {};
+// Lazily-loaded, cached Voiceflow MCP toolset. Agents resolve their tools through
+// ensureVfTools() on EVERY request (Mastra DynamicArgument), so:
+//   - a cold-start connect failure (or a token that only becomes valid once the user
+//     consents at /oauth/start) self-heals on the next request — no redeploy needed;
+//   - once loaded, the cached toolset is returned instantly (the live MCP connection
+//     refreshes the short-lived token per request via the custom fetch).
+let vfToolsCache: Record<string, any> = {};
+let vfToolsLoaded = false;
+let vfLoadInflight: Promise<Record<string, any>> | undefined;
+let vfLoadCooldownUntil = 0;
 const mcpDiag: Record<string, unknown> = {
   authMode: useVoiceflowOAuth() ? 'oauth' : 'token',
   tokenPresent: hasVoiceflowToken(),
   tools: 0,
 };
-if (useVoiceflowOAuth() || hasVoiceflowToken()) {
-  try {
-    vfTools = await getVoiceflowTools();
-    const names = Object.keys(vfTools);
-    mcpDiag.tools = names.length;
-    mcpDiag.names = names.slice(0, 40);
-    console.info(`[voiceflow-mcp] loaded ${names.length} tools (${useVoiceflowOAuth() ? 'oauth' : 'token'})`);
-  } catch (err) {
-    mcpDiag.error = (err as Error).message;
-    console.warn('[voiceflow-mcp] failed to load tools:', (err as Error).message);
-    if (useVoiceflowOAuth()) {
-      console.warn('[voiceflow-mcp] OAuth mode: if not yet authorized, visit /oauth/start once to consent.');
-    }
+
+async function ensureVfTools(): Promise<Record<string, any>> {
+  if (vfToolsLoaded) return vfToolsCache;
+  if (!(useVoiceflowOAuth() || hasVoiceflowToken())) return vfToolsCache;
+  if (Date.now() < vfLoadCooldownUntil) return vfToolsCache;
+  if (!vfLoadInflight) {
+    vfLoadInflight = (async () => {
+      try {
+        const t = await getVoiceflowTools();
+        const names = Object.keys(t);
+        if (names.length > 0) {
+          vfToolsCache = t;
+          vfToolsLoaded = true;
+          mcpDiag.tools = names.length;
+          mcpDiag.names = names.slice(0, 40);
+          delete mcpDiag.error;
+          console.info(`[voiceflow-mcp] loaded ${names.length} tools (${useVoiceflowOAuth() ? 'oauth' : 'token'})`);
+        } else {
+          // Connect failed silently inside the MCP client (returns {}). Back off briefly.
+          vfLoadCooldownUntil = Date.now() + 15_000;
+          console.warn('[voiceflow-mcp] 0 tools (connect failed) — will retry on a later request.');
+          if (useVoiceflowOAuth()) console.warn('[voiceflow-mcp] if not yet authorized, visit /oauth/start once to consent.');
+        }
+      } catch (err) {
+        mcpDiag.error = (err as Error).message;
+        vfLoadCooldownUntil = Date.now() + 15_000;
+        console.warn('[voiceflow-mcp] load failed:', (err as Error).message);
+      } finally {
+        vfLoadInflight = undefined;
+      }
+      return vfToolsCache;
+    })();
   }
+  return vfLoadInflight;
+}
+
+if (useVoiceflowOAuth() || hasVoiceflowToken()) {
+  // Best-effort warm-up at boot so the first real request is fast; non-fatal if it
+  // fails (ensureVfTools will retry lazily on a later request).
+  await ensureVfTools();
 } else {
   console.warn(
     '[voiceflow-mcp] VF_MCP_TOKEN not set and VF_AUTH_MODE!=oauth — agents boot WITHOUT ' +
@@ -107,16 +147,24 @@ if (pgUrl) {
   console.info(`[storage] libsql; [memory] ${memory ? 'local' : 'off (set DATABASE_URL for durable memory)'}`);
 }
 
+// Test/eval escape hatch: run agents with NO memory, so dev scripts can call
+// generate() without a thread/resource (resource-scoped working memory + thread-scoped
+// OM otherwise require them). Irrelevant to routing/perf, which is what evals measure.
+if (process.env.MEMORY_DISABLED) {
+  memory = undefined;
+  console.warn('[memory] disabled (MEMORY_DISABLED)');
+}
+
 // Workers (debug has its own structured-output helper; the rest come from specs).
 const workers: Record<string, Agent> = {
-  'debug-agent': buildDebugAgent(vfTools, workspace, memory),
+  'debug-agent': buildDebugAgent(ensureVfTools, workspace, memory),
 };
 for (const spec of WORKER_SPECS) {
-  workers[spec.key] = buildWorker(spec, vfTools, workspace, memory);
+  workers[spec.key] = buildWorker(spec, ensureVfTools, workspace, memory);
 }
 
 // Supervisor: delegates to the workers (auto `agent-<key>` tools).
-const orchestrator = buildOrchestrator(workers, vfTools, workspace, memory);
+const orchestrator = buildOrchestrator(workers, ensureVfTools, workspace, memory);
 
 export const mastra = new Mastra({
   agents: { orchestrator, ...workers },
@@ -124,6 +172,10 @@ export const mastra = new Mastra({
     'analyze-transcripts': analyzeTranscriptsWorkflow,
     'prompt-optimizer': promptOptimizerWorkflow,
   },
+  // Eval scorers (Mastra eval suite), visible in Studio.
+  // - skill-routing: golden-set regression scorer (offline, runRoutingEval.ts).
+  // - skill-routing-judge: LLM-judged routing quality for live runs (no ground truth).
+  scorers: { 'skill-routing': skillRoutingScorer, 'skill-routing-judge': skillRoutingJudgeScorer },
   // Durable store chosen above: Postgres (Neon) when reachable, else LibSQL.
   // Backs workflow runs, memory threads, and the editor.
   storage,
@@ -139,6 +191,111 @@ export const mastra = new Mastra({
       registerApiRoute('/_diag/mcp', {
         method: 'GET',
         handler: async (c) => c.json(mcpDiag),
+      }),
+      // Custom in-order demo UI: one chronological column (message → reasoning → tool →
+      // skill → message) over the live /stream. The Studio playground splits the chat and
+      // the trace into separate panes, which is hard to follow during a live demo.
+      registerApiRoute('/demo', {
+        method: 'GET',
+        // no-store: the widget changes often during the demo build-out; never serve a stale copy.
+        handler: async (c) => {
+          c.header('Cache-Control', 'no-store');
+          return c.html(DEMO_HTML);
+        },
+      }),
+      // Admin: wipe ALL conversation memory (threads, messages, working memory,
+      // observational memory, thread state, and semantic-recall vectors) for a clean
+      // demo. Preserves oauth_kv (MCP auth) and agent/editor/skill config. Gated by
+      // ?confirm=yes. Discovers pgvector recall tables dynamically so nothing is missed.
+      registerApiRoute('/_diag/reset-memory', {
+        method: 'GET',
+        handler: async (c) => {
+          if (c.req.query('confirm') !== 'yes') {
+            return c.text(
+              'Add ?confirm=yes to wipe ALL conversation memory (threads, messages, working ' +
+                'memory, observational memory, semantic-recall vectors). Auth tokens and agent ' +
+                'config are preserved.',
+              400,
+            );
+          }
+          const url = getPostgresUrl();
+          if (!url) return c.json({ ok: false, error: 'No Postgres configured (memory is on /tmp libsql).' }, 400);
+          const client = new Client({ connectionString: url, ssl: PG_SSL, connectionTimeoutMillis: 10_000 });
+          const cleared: Record<string, number> = {};
+          try {
+            await client.connect();
+            const present = new Set(
+              (await client.query("SELECT table_name FROM information_schema.tables WHERE table_schema='public'")).rows.map(
+                (r: any) => r.table_name,
+              ),
+            );
+            // Memory tables + any pgvector (semantic-recall embedding) tables.
+            const memTables = [
+              'mastra_messages',
+              'mastra_threads',
+              'mastra_resources',
+              'mastra_observational_memory',
+              'mastra_thread_state',
+            ];
+            const vecTables = (
+              await client.query("SELECT DISTINCT table_name FROM information_schema.columns WHERE table_schema='public' AND udt_name='vector'")
+            ).rows.map((r: any) => r.table_name);
+            const PRESERVE = new Set(['oauth_kv']);
+            const toClear = [...new Set([...memTables, ...vecTables])].filter((t) => present.has(t) && !PRESERVE.has(t));
+            for (const t of toClear) {
+              cleared[t] = (await client.query(`SELECT count(*)::int AS n FROM "${t}"`)).rows[0].n;
+            }
+            if (toClear.length) {
+              await client.query(`TRUNCATE TABLE ${toClear.map((t) => `"${t}"`).join(', ')} CASCADE`);
+            }
+            return c.json({ ok: true, cleared, preserved: ['oauth_kv', 'agent/editor/skill config'] });
+          } catch (e: any) {
+            return c.json({ ok: false, error: e?.message ?? String(e), cleared }, 500);
+          } finally {
+            try {
+              await client.end();
+            } catch {
+              /* ignore */
+            }
+          }
+        },
+      }),
+      // Deep, on-demand OAuth probe: decodes the stored token, tests it against the
+      // MCP server, and does a manual refresh — pinpoints WHY tools fail to load.
+      registerApiRoute('/_diag/mcp-probe', {
+        method: 'GET',
+        handler: async (c) => {
+          try {
+            return c.json(await probeVoiceflowMcp());
+          } catch (e: any) {
+            return c.json({ error: e?.message ?? String(e) }, 500);
+          }
+        },
+      }),
+      // Diagnostic + smoke test for grep_transcripts: GET /_diag/grep?projectID=..&pattern=..&limit=..
+      // Exercises the live OAuth fetch + content scan without going through an agent run.
+      registerApiRoute('/_diag/grep', {
+        method: 'GET',
+        handler: async (c) => {
+          const projectID = c.req.query('projectID');
+          const pattern = c.req.query('pattern');
+          if (!projectID || !pattern) {
+            return c.text('Add ?projectID=..&pattern=.. (optional &limit=, &startDate=, &endDate=)', 400);
+          }
+          const limit = c.req.query('limit') ? Number(c.req.query('limit')) : undefined;
+          try {
+            const out = await (grepTranscriptsTool as any).execute({
+              projectID,
+              pattern,
+              ...(limit ? { limit } : {}),
+              ...(c.req.query('startDate') ? { startDate: c.req.query('startDate') } : {}),
+              ...(c.req.query('endDate') ? { endDate: c.req.query('endDate') } : {}),
+            });
+            return c.json(out);
+          } catch (e: any) {
+            return c.json({ ok: false, error: e?.message ?? String(e) }, 500);
+          }
+        },
       }),
       // OAuth (VF_AUTH_MODE=oauth): visit /oauth/start once in a browser to consent;
       // the server redirects you to Voiceflow, then back to /oauth/callback, which
@@ -158,6 +315,20 @@ export const mastra = new Mastra({
           }
         },
       }),
+      registerApiRoute('/oauth/reset', {
+        method: 'GET',
+        handler: async (c) => {
+          if (c.req.query('confirm') !== 'yes') {
+            return c.text('Add ?confirm=yes to clear ALL stored OAuth state (client + tokens). You will then need /oauth/start again.', 400);
+          }
+          try {
+            await resetVoiceflowOAuth();
+            return c.text('OAuth state cleared. Visit /oauth/start to consent fresh.', 200);
+          } catch (e: any) {
+            return c.text(`OAuth reset failed: ${e?.message ?? e}`, 500);
+          }
+        },
+      }),
       registerApiRoute('/oauth/callback', {
         method: 'GET',
         handler: async (c) => {
@@ -169,9 +340,17 @@ export const mastra = new Mastra({
           if (!code) return c.text('Missing ?code in callback.', 400);
           try {
             await completeVoiceflowAuthorization(code);
+            // Fresh consent → drop any stale token/backoff state and load tools NOW so
+            // this warm instance is immediately usable (no redeploy / cold start needed).
+            resetVoiceflowTokenCache();
+            vfToolsLoaded = false;
+            vfToolsCache = {};
+            vfLoadCooldownUntil = 0;
+            const tools = await ensureVfTools();
+            const n = Object.keys(tools).length;
             return c.html(
-              '<h2>✅ Voiceflow MCP authorized</h2><p>Tokens stored. You can close this tab. ' +
-                'The copilot picks up the tools on its next cold start (or redeploy to force it).</p>',
+              `<h2>✅ Voiceflow MCP authorized</h2><p>Tokens stored and ${n} tool${n === 1 ? '' : 's'} loaded. ` +
+                'You can close this tab and start using the copilot.</p>',
             );
           } catch (e: any) {
             return c.text(`OAuth callback failed: ${e?.message ?? e}`, 500);
@@ -181,7 +360,12 @@ export const mastra = new Mastra({
       registerApiRoute('/oauth/status', {
         method: 'GET',
         handler: async (c) =>
-          c.json({ mode: useVoiceflowOAuth() ? 'oauth' : 'token', hasTokens: await hasVoiceflowTokens() }),
+          c.json({
+            mode: useVoiceflowOAuth() ? 'oauth' : 'token',
+            hasTokens: await hasVoiceflowTokens(),
+            mcpUrl: env.vf.mcpUrl,
+            authServer: env.vf.oauthAuthServer || '(discovered from MCP server)',
+          }),
       }),
     ],
   },
@@ -189,10 +373,13 @@ export const mastra = new Mastra({
   // in `storage`). Durable with Postgres; ephemeral on the /tmp fallback.
   editor: new MastraEditor(),
   // Build-time only: emits a Vercel Build Output API bundle (with the Studio SPA).
-  // maxDuration is env-driven so it can be tuned to the target plan's ceiling
-  // (Hobby 60s / Pro 300s) — agent runs are long, so give them as long as allowed.
+  // Agent runs are long — a full agent build makes many sequential MCP calls — so
+  // give the function as long as the plan allows. Default 600s (10 min); override
+  // via VERCEL_FN_MAX_DURATION. Ceilings: with Fluid Compute, Pro/Enterprise allow
+  // up to 800s; without Fluid, Pro caps at 300s. If a deploy errors on maxDuration,
+  // enable Fluid Compute for the project or set VERCEL_FN_MAX_DURATION=300.
   deployer: new VercelDeployer({
     studio: true,
-    maxDuration: Number(process.env.VERCEL_FN_MAX_DURATION ?? 60),
+    maxDuration: Number(process.env.VERCEL_FN_MAX_DURATION ?? 600),
   }),
 });

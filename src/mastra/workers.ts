@@ -3,9 +3,21 @@ import type { Workspace } from '@mastra/core/workspace';
 import type { Memory } from '@mastra/memory';
 import { loadMarkdownBody } from '../lib/loadPrompt';
 import { makeContextProcessors } from './memory';
+import { makeStreamSlimmer } from './streamSlimmer';
 import { mainModel, triageModel } from './models';
+import { updatePlanTool } from '../tools/updatePlan';
+import { grepTranscriptsTool } from '../tools/grepTranscripts';
+
+/**
+ * Live checklist tool (see tools/updatePlan). Attached to workers that do complex multi-step
+ * work via the `tasks` spec flag. The agent calls it with the full plan; the list rides out
+ * on the tool-call args (forwarded during delegation) and the /demo widget renders it.
+ * No native task-store/threadState dependency — those error on sub-agents that lack a thread.
+ */
+const PLAN_TOOLS = { update_plan: updatePlanTool } as const;
 import { loadPromptingGuideTool } from '../tools/promptingGuide';
 import { diffPromptsTool } from '../tools/diffPrompts';
+import { resolveToolsArg, type ToolsArg } from './dynamicTools';
 
 export type Tier = 'main' | 'triage';
 
@@ -24,6 +36,8 @@ export interface WorkerSpec {
   maxTokens?: number;
   /** Local (non-MCP) createTool tools to attach, keyed by tool name. */
   localTools?: Record<string, unknown>;
+  /** Attach Mastra's native live to-do list (task tools + state processor) for multi-step work. */
+  tasks?: boolean;
 }
 
 const TIER_MODEL: Record<Tier, typeof mainModel> = {
@@ -32,7 +46,12 @@ const TIER_MODEL: Record<Tier, typeof mainModel> = {
 };
 
 const DEFAULT_MAX_TOKENS = 8000;
-const DEFAULT_MAX_STEPS = 12;
+// Tool-step budget per agent run. A full one-shot build (project + global prompt + KB
+// docs + playbook + functions + routing + compile, plus a few retries) needs well over
+// a dozen tool calls, so 12 capped it mid-build ("reached maxSteps while tool calls were
+// still pending"). 40 gives ample headroom; the 600s function timeout + per-step
+// maxOutputTokens remain the real runaway backstops. Override via AGENT_MAX_STEPS.
+const DEFAULT_MAX_STEPS = Number(process.env.AGENT_MAX_STEPS ?? 40);
 
 /**
  * Shared grounding. The plugin methodology sometimes uses older MCP op names;
@@ -41,6 +60,7 @@ const DEFAULT_MAX_STEPS = 12;
 export const LIVE_TOOL_REFERENCE = [
   '# Live Voiceflow MCP tools',
   'Your tools come from the Voiceflow MCP, namespaced voiceflow_*. Each takes an `operation` parameter.',
+  'CRITICAL — environmentID for draft-editing tools (global_prompt, agent_instructions, routing, playbook, workflow, function, variable, …): resolve it from voiceflow_project.get. v1.3 projects (have an `environments` map) → use environments[Main].draftVersionID. v1.2 projects (have devVersion/liveVersion) → use devVersion (or activeEnvironmentID). NEVER pass the environment id (environments[].id) or the alias "development" — they fail with "Version does not exist" / a 500. (voiceflow_environment.* ops are the exception: they take the real environment id.)',
   'Key tools/ops:',
   '- voiceflow_project (list|get|get_api_key|export), voiceflow_environment (list|get|clone|publish|merge|compile)',
   '- voiceflow_playbook (list|get|create|update), voiceflow_global_prompt (get|update), voiceflow_agent_instructions (get|update), voiceflow_routing',
@@ -51,6 +71,36 @@ export const LIVE_TOOL_REFERENCE = [
   'Rules: pass the right operation; never fabricate data a tool did not return; confirm before any write;',
   'never write to Main directly (clone/use a working environment); always verify after applying.',
 ].join('\n');
+
+/**
+ * Shared voice + interaction style for every agent. The copilot UI shows reasoning and
+ * tool calls separately, so the agent's WRITTEN messages are the product. This makes them
+ * act and talk like a sharp, candid teammate — concise, ID-free, biased to action —
+ * rather than an operations log. GLM honors concrete WRONG/RIGHT examples, so we give them.
+ */
+export const COMMS_STYLE = `# Voice — how you talk and act
+
+Your reasoning and tool calls render separately in the UI, so your WRITTEN messages are the product. Communicate like a sharp, candid teammate walking someone through the work — not a script logging operations.
+
+## Keep messages clean
+- Lead with the point. Be concise and skimmable — a short heading, a small table, or a few bullets (the UI renders markdown). No preamble, no filler, no flattery ("Great question!", "I'd be happy to...").
+- NEVER print raw IDs: projectID, environmentID, draftVersionID, playbookID, documentID, functionID, toolCallId, API keys. Name things in human terms — "the project", "the Book a Visit playbook", "the knowledge base".
+- Don't narrate internal mechanics: tool/operation names, captureResponse, pathOrder, "the field expects an array", draft-vs-environment IDs, compile internals.
+- Report honestly but not noisily. State what happened plainly, no hedging. A handled internal snag is one plain phrase or nothing — never a stack trace or a validation dump. Only surface a problem the user must act on.
+  WRONG: "playbook.create succeeded (playbookID 6a3e2036…). Now calling tool.create with captureResponse mapping current_answer → var 6a3e…"
+  RIGHT: "Booking playbook's in and wired to the question function. Next: routing, then a quick test."
+  WRONG: "Function returned invalid path 'success' not in expected paths '[]'. pathOrder only sets ordering, so I must register paths…"
+  RIGHT: "Hit a snag where the function's paths weren't registered — fixed it, and the test passes now."
+
+## Act — don't ask permission for the obvious
+- On a clear brief, BUILD it. Make sensible default decisions and state them in a line; don't stop to confirm each step. It's a draft — reversible.
+- Give a recommendation, not a menu. End on the next step you're taking or recommend, not an open "what would you like to do?". Offer choices only when they genuinely diverge.
+- Pause for confirmation ONLY when a decision is truly the user's (a real fork, no clear default) OR the action is hard to reverse / outward-facing — publishing to live, merging to Main, deleting, anything an end-user sees.
+  WRONG: "Here's the full global prompt [400 words]. Should I apply it? Once you confirm I'll build the playbook."
+  RIGHT: "Global prompt set — friendly local-pro persona, prices and hours locked in. Building the booking playbook next."
+- Be candid. If the brief is thin, an idea is weak, or a result looks off, say so directly and recommend the fix — don't bury it or rubber-stamp.
+
+Default to brevity and momentum: the user wants to watch an agent take shape, not approve each keystroke.`;
 
 /** Instructions = agent .md body + a skill-loading preamble + the live tool reference.
  *  Skill BODIES are no longer injected — they're loaded on demand via the workspace skill tools. */
@@ -64,23 +114,30 @@ function instructionsFor(spec: { agentFile: string; skills: string[] }): string 
         'Use `skill_search` to discover other relevant skills (e.g. environments, wiring-architect, prompting, knowledge-base) and `skill_read` for a skill’s reference files. Do not work from memory — load the skill.',
       ].join('\n')
     : '';
-  return [body, skillNote, `\n\n---\n\n${LIVE_TOOL_REFERENCE}`].join('');
+  return [body, skillNote, `\n\n---\n\n${LIVE_TOOL_REFERENCE}`, `\n\n---\n\n${COMMS_STYLE}`].join('');
 }
 
 /** Build a synchronous worker agent from its .md + model tier, with the shared skill workspace. */
 export function buildWorker(
   spec: WorkerSpec,
-  tools: Record<string, any> = {},
+  tools: ToolsArg = {},
   workspace?: Workspace,
   memory?: Memory,
 ): Agent {
+  // Resolve the Voiceflow MCP toolset per-request (lazy/self-healing) and merge in the
+  // worker's static local tools each time.
+  const vfTools = resolveToolsArg(tools);
   return new Agent({
     id: spec.id,
     name: spec.name,
     description: spec.description,
     instructions: instructionsFor(spec),
     model: TIER_MODEL[spec.tier],
-    tools: { ...tools, ...(spec.localTools ?? {}) },
+    tools: async (ctx: any) => ({
+      ...(await vfTools(ctx)),
+      ...(spec.localTools ?? {}),
+      ...(spec.tasks ? PLAN_TOOLS : {}),
+    }),
     workspace,
     memory,
     // Token-budget the assembled context (window + recall + working memory) at every step.
@@ -99,22 +156,27 @@ export function buildWorker(
  */
 export function buildOrchestrator(
   agents: Record<string, Agent>,
-  tools: Record<string, any> = {},
+  tools: ToolsArg = {},
   workspace?: Workspace,
   memory?: Memory,
 ): Agent {
+  const vfTools = resolveToolsArg(tools);
   return new Agent({
     id: 'orchestrator',
     name: 'orchestrator',
     description:
       'Voiceflow copilot supervisor. Routes requests to specialized workers (build, debug, review, audit-kb, setup-evals, test-runner).',
-    instructions: loadMarkdownBody('agents/orchestrator.md'),
+    instructions: `${loadMarkdownBody('agents/orchestrator.md')}\n\n---\n\n${COMMS_STYLE}`,
     model: mainModel,
-    tools,
+    // grep_transcripts exposed for ad-hoc "find every chat where X" without delegating.
+    tools: async (ctx: any) => ({ ...(await vfTools(ctx)), grep_transcripts: grepTranscriptsTool }),
     agents,
     workspace,
     memory,
     inputProcessors: makeContextProcessors(),
+    // Drop the heavy sub-agent lifecycle chunks forwarded during delegation (see streamSlimmer):
+    // ~7x smaller stream, which keeps long mobile builds from dropping the connection mid-build.
+    outputProcessors: [makeStreamSlimmer()],
     defaultOptions: {
       maxSteps: DEFAULT_MAX_STEPS,
       modelSettings: { maxOutputTokens: DEFAULT_MAX_TOKENS },
@@ -124,9 +186,10 @@ export function buildOrchestrator(
 
 /**
  * Synchronous workers ported from the plugin (model tiers matched:
- * opus -> main, sonnet -> triage). The infra-heavy workers
- * (analyze-transcripts, prompt-optimizer, memory/learn) are intentionally
- * NOT here — they need workflows/durable jobs/stores and are built later.
+ * opus -> main, sonnet -> triage). analyze-transcripts is a sequential-batched
+ * v1 (no parallel-triage infra yet — added later if bulk runs get slow). The
+ * remaining infra-heavy workers (prompt-optimizer, memory/learn) are still out —
+ * they need durable workflows/jobs/stores.
  * debug-agent lives in ./agents/debugAgent.ts (it has a structured-output helper).
  */
 export const WORKER_SPECS: WorkerSpec[] = [
@@ -140,6 +203,18 @@ export const WORKER_SPECS: WorkerSpec[] = [
     skills: ['build-agent', 'document'],
     tier: 'main',
     localTools: { loadPromptingGuide: loadPromptingGuideTool, diffPrompts: diffPromptsTool },
+    tasks: true,
+  },
+  {
+    key: 'analyze-transcripts-agent',
+    id: 'analyze-transcripts-agent',
+    name: 'analyze-transcripts-agent',
+    description:
+      'Bulk transcript analysis — pulls recent transcripts, triages them, deep-reads the worst, correlates failure patterns, and returns prioritized findings with evidence and fixes. Route here for agent health checks, "what\'s going wrong across conversations", or systemic-issue hunts (not a single transcript — that\'s debug-agent).',
+    agentFile: 'agents/analyze-transcripts-agent.md',
+    skills: ['debug'],
+    tier: 'main',
+    localTools: { grep_transcripts: grepTranscriptsTool },
   },
   {
     key: 'review-agent',

@@ -2,7 +2,7 @@
 name: prompting
 description: >
   Voiceflow prompt engineering methodology. Covers the three prompt layers
-  (global/operator/playbook), XML tag structure, wrong/right examples, and
+  (global / main agent / playbook), XML tag structure, wrong/right examples, and
   common anti-patterns.
   TRIGGER when: user asks to write a prompt, edit a prompt, review prompt
   quality, or asks about prompt structure in Voiceflow.
@@ -15,9 +15,9 @@ version: 0.1.0
 
 ### Global Prompt
 
-Carries across ALL playbooks. Every LLM call sees this.
+Carries across ALL playbooks. Every LLM call sees this. It's a **single field** — write the persona sections and the guardrail sections together (there is no separate "guidelines" field).
 
-**Persona field** — pack four sections in:
+**Persona sections** — pack these four in:
 
 `<identity>` — WHO the agent IS and IS NOT:
 ```xml
@@ -61,7 +61,7 @@ RIGHT: [just answer the question]
 </formatting>
 ```
 
-**Guidelines field** — operational rules across ALL playbooks:
+**Guardrail sections** — operational rules across ALL playbooks (same field, after the persona sections):
 - `<terminology>` — Brand names, forbidden words
 - `<escalation>` — When and how to hand off
 - `<silent_execution>` — Never expose tool calls or reasoning
@@ -69,10 +69,10 @@ RIGHT: [just answer the question]
 
 Models pay extra attention to content under `# Guardrails`.
 
-Keep concise (100-300 words per field). If removing a sentence only
+Keep concise (100-300 words per section). If removing a sentence only
 affects one use case, it doesn't belong in the global prompt.
 
-### Operator Instructions (Global Agent)
+### Main Agent Instructions
 
 Controls ROUTING — how the agent decides which playbook to use.
 
@@ -94,13 +94,13 @@ XML sections: `<context>`, `<flow>`, `<rules>`, `<edge_cases>`, `<exit>`.
 
 ## Common Anti-Patterns
 
-**Identity duplication** — repeating "You are X" in operator or playbook:
+**Identity duplication** — repeating "You are X" in the main agent or playbook:
 ```
-WRONG (operator):
+WRONG (main agent):
   <role>You are Mochita, the virtual barista...</role>
   <routing>Route to Ordering when...</routing>
 
-RIGHT (operator):
+RIGHT (main agent):
   <routing>Route to Ordering when...</routing>
 ```
 
@@ -119,7 +119,7 @@ actionable. Always include WRONG/RIGHT examples.
 **Missing formatting rules** — without them, the agent defaults to
 verbose, inconsistent responses.
 
-**Mixing routing with persona** — operator instructions should contain
+**Mixing routing with persona** — main agent instructions should contain
 ONLY routing logic. Persona belongs in the global prompt.
 
 ---
@@ -186,7 +186,7 @@ When reviewing prompts, check:
 
 1. **Tool coverage**: Every assigned tool mentioned in instructions
 2. **Tool variable alignment**: Input var names match actual tool schema
-3. **Crew coverage** (operator): Routing references every sub-agent
+3. **Crew coverage** (main agent): Routing references every sub-agent
 4. **No phantom references**: Nothing mentioned that doesn't exist
 5. **XML structure**: Logical sections with tags
 6. **Voice rules** (voice channel): Short responses, one question per turn
@@ -219,6 +219,6 @@ See `voice` skill for full voice-specific guidance.
 - **`prompt-optimizer`** — once a prompt is deployed, use transcript-driven optimization to find what to improve.
 - **`wiring-architect`** — many "the prompt isn't working" issues are actually function/tool wiring issues. Read this if your prompt has the right rules but the agent still fails.
 - **`build-agent`** — full build context when designing prompts as part of a new agent.
-- **`agent-architecture`** — for multi-agent / playbook prompt architecture (global + operator + playbooks).
+- **`agent-architecture`** — for multi-agent / playbook prompt architecture (global + main agent + playbooks).
 - **`voice`** — when writing prompts for voice agents (different rules for length, formatting, tool announcements).
 - **`voiceflow-overview`** — index of all available skills.

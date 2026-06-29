@@ -92,25 +92,25 @@ Apply the **playbook test**:
 **Create a playbook ONLY when:**
 - The task has a distinct multi-step flow (booking, ordering, onboarding)
 - The task needs functions or API tools
-- The task has its own rules that would clutter the operator prompt
+- The task has its own rules that would clutter the main agent instructions
 
-**Keep on the operator when:**
-- The task is answering questions (use KB on the operator)
+**Keep in the main agent when:**
+- The task is answering questions (use KB on the main agent)
 - The task has no tools beyond KB/web search
 - Creating a playbook would just be a thin wrapper around a KB query
 
 **The test:** If a playbook's only tool would be the Knowledge Base,
-it should NOT be a playbook. The operator handles Q&A directly.
+it should NOT be a playbook. The main agent handles Q&A directly.
 
 Present a concise architecture plan:
-- Agent pattern (single agent vs operator + playbooks)
-- What the operator handles directly (with KB)
+- Agent pattern (single agent vs main agent + playbooks)
+- What the main agent handles directly (with KB)
 - Which playbooks are needed and why
 - Functions needed
 - KB documents needed
 - Crew routing logic (if playbooks exist)
 
-Get confirmation on the plan before writing any prompts.
+Share the plan in a line or two, then build it — you don't need sign-off on a clear brief. Pause only if a requirement is genuinely ambiguous (ask one tight question, then proceed).
 
 #### Phase 3: Write prompts
 
@@ -119,10 +119,12 @@ defines the prompt structure you MUST follow — do not write from memory.
 
 The global prompt is prepended to EVERY playbook call. Identity, tone,
 and formatting rules set here are inherited everywhere. Never repeat
-them in operator instructions or playbook instructions.
+them in main agent instructions or playbook instructions.
 
-**Show the user the full prompt text** for each component before applying.
-Don't just show a summary — show the actual prompt they'll be deploying.
+Build each component, then say what you set in plain terms. Don't gate on
+pasting the full prompt text or waiting for approval first — it's a draft the
+user can review or tweak anytime. If they want to see or change the exact
+wording, they'll ask.
 
 #### Phase 4: Build via API
 
@@ -192,16 +194,43 @@ User has API docs and wants a Voiceflow tool:
 
 ---
 
-## Confirmation Protocol
+## When to act vs. confirm
 
-**Every change requires explicit user confirmation.**
+Act on a clear brief. Build the whole agent in the draft — project, prompts,
+playbooks, functions, KB, routing — without asking permission step by step.
+State the decisions you make in a line as you go; the user can redirect.
 
-Before applying anything, show:
-- **What** you are changing
-- **Where** it lives (which agent, which section, which tool)
-- **Why** this fixes the problem or achieves the goal
+Pause for confirmation ONLY when:
+- A real decision is the user's with no sensible default (a genuinely ambiguous
+  requirement) — ask one tight question, then proceed.
+- The action is hard to reverse or outward-facing: **publishing to live,
+  merging to Main, deleting**, or anything an end-user would see. Always confirm those.
 
-Then ask: "Should I go ahead?"
+Routine draft edits never need a check. Default to momentum — the user wants to
+watch the agent take shape, not approve each step.
+
+---
+
+## Task list (plan a complex build out loud)
+
+For any multi-step build (roughly 3+ distinct steps — e.g. a full agent: project,
+prompt, playbooks, functions, KB, routing, test), use the `update_plan` tool. It's
+the plan, and the user watches it tick off live as you build.
+
+- **Start** by calling `update_plan` with the whole checklist — one item per major
+  step, phrased as outcomes the user cares about ("Add the booking flow", "Wire
+  routing", "Smoke test"), NOT internal mechanics ("call playbook.create"). 4–8
+  items is the sweet spot; don't list every tool call.
+- **Every time a step changes status, call `update_plan` again with the COMPLETE
+  list** (not just the changed item) — flip the finished step to `completed` and the
+  next to `in_progress`. Keep exactly **one** item `in_progress`.
+- If the plan changes mid-build, send the new full list.
+- **Skip it entirely for a single-step edit** (one prompt tweak, one setting). A
+  checklist for a one-liner is noise — the list earns its place only when the work
+  has real structure.
+
+Don't gate on the list — send it and immediately start working it. It's a live
+plan, not an approval step.
 
 ---
 
@@ -227,7 +256,7 @@ duplication.
 
 ## Rules
 
-- Always confirm before applying any change
+- Confirm before outward/irreversible actions (publish, merge to Main, delete) — not routine draft edits
 - Never write to Main directly — resolve/clone the working environment first (see `environments`)
 - Always verify after applying (re-fetch and check)
 - Always use XML tags for prompt structure

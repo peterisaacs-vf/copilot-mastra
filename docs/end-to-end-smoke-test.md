@@ -43,6 +43,7 @@ vercel deploy --prebuilt --prod --archive=tgz \
   --token "$(cat scratchpad/.vctoken)" \
   -e GLM_API_KEY="$GLM_API_KEY" \
   -e VF_MCP_TOKEN="$VF_MCP_TOKEN" \
+  -e MASTRA_TELEMETRY_DISABLED=1 \
   --yes
 ```
 
@@ -117,24 +118,110 @@ across the steps.
 
 ---
 
-## OAuth flow (when staging is ready)
+## Eval → Studio (Datasets / Experiments)
 
-The bearer token works today; OAuth (auth-code + refresh) is built and deployed but
-**off by default** (`VF_AUTH_MODE` unset → `token`). Server discovery is confirmed:
-`auth-api.voiceflow.com`, scopes `universal.workspace.read/.write`, public client + PKCE,
-DCR + discovery enabled. Our callback is live at `https://copilot-mastra.vercel.app/oauth/callback`.
+Goal: routing-eval history shows up in **Studio → Datasets → Experiments** instead of only in
+script stdout (closes the "eval runs aren't in Studio" gap). Built on Mastra's Datasets +
+Experiments + the `skill-routing` scorer.
 
-To test against Ben's staging:
-1. Get the **staging MCP server URL** from Ben (discovery resolves the staging auth server from it).
-2. Redeploy with `-e VF_AUTH_MODE=oauth -e VF_MCP_URL=<staging-mcp-url>` (callback stays the prod URL Ben allow-listed).
-3. In a browser, visit `https://copilot-mastra.vercel.app/oauth/start` → it redirects to Voiceflow → **consent once** → back to `/oauth/callback` (success page). Tokens persist in Postgres (`oauth_kv` table).
-4. `curl /oauth/status` → `{"mode":"oauth","hasTokens":true}`.
-5. Force a cold start (redeploy or wait) so agents pick up the tools → `curl /_diag/mcp` → `tools > 0`.
-6. Revert to `token` mode (or prod `VF_MCP_URL`) when done.
+**Already wired (live now):** dataset **`skill-routing-golden`** (29 items) exists in the
+deployed Studio's **Datasets** tab. Source of truth = `src/mastra/scorers/routingDataset.ts`.
 
-Notes: tokens auto-refresh after the one-time consent (no re-consent). `OAuth start failed`
-on `/oauth/start` usually means discovery/DCR rejected our `redirect_uri` — ping Ben to confirm
-it's allow-listed on the env you pointed `VF_MCP_URL` at.
+**Two scripts:**
+- `src/scripts/wireRoutingExperiment.ts` — REST, **needs no local secrets**. Find-or-creates
+  the dataset on a deployed app and syncs items (idempotent). Run:
+  `npx tsx src/scripts/wireRoutingExperiment.ts [--url https://copilot-mastra.vercel.app]`
+- `src/scripts/runRoutingExperiment.ts` — the **executor** (SDK). Runs the experiment and
+  persists to whatever storage *the process* uses:
+  - **Lands in deployed Studio:** `DATABASE_URL='<neon-url>' GLM_API_KEY='<valid>' npx tsx src/scripts/runRoutingExperiment.ts`
+  - **Dry run (local libsql, won't reach Studio):** `GLM_API_KEY='<valid>' npx tsx src/scripts/runRoutingExperiment.ts`
+
+**To fire it (lands in deployed Studio):**
+1. Get the **Neon URL** (Vercel project env `DATABASE_URL`, or the Neon dashboard).
+2. `DATABASE_URL='<neon>' GLM_API_KEY='<valid-fireworks-key>' npx tsx src/scripts/runRoutingExperiment.ts`
+3. Open `$BASE/` → **Datasets → skill-routing-golden → Experiments**.
+
+**Three findings that shaped this (so we don't re-learn them):**
+1. **`mastra api experiment run` does NOT work against the Vercel deploy.** The runner starts
+   the experiment in a background task *after* sending its HTTP response, and Vercel freezes
+   the function once the response is sent — so the run never executes (it lands as `failed`
+   with `startedAt: null`). Dataset create + item sync over REST/CLI *do* work. Experiment
+   **execution** needs a persistent process: the executor script, or a non-serverless Mastra
+   server pointed at Neon. (This is the real reason the executor runs locally/elsewhere.)
+2. **Thread-scoped Observational Memory needs a threadId per call**, and the REST experiment
+   runner (`targetType:'agent'`) doesn't inject one per item. The executor sidesteps this by
+   running with **memory off** (`MEMORY_DISABLED=1`, set automatically) — routing doesn't use
+   memory, so behavior is unaffected.
+3. **Mastra storage bug:** a dataset's `scorerIds` is stored/returned as a JSON *string*, and
+   `runExperiment` does `[...datasetScorerIds]`, spreading it into characters →
+   `Scorer with id [ not found`. **Workaround:** don't set `scorerIds` on the dataset record;
+   pass the scorer in the experiment-run body / `startExperiment({ scorers })`. (The prod
+   dataset's `scorerIds` was already PATCHed to `null`.)
+
+> ⚠️ The executor runs the orchestrator **locally**, so it needs a valid `GLM_API_KEY` in the
+> local env. The `.env` key was **stale (401)** this session — set a working Fireworks key
+> before running. (`DATABASE_URL` only needs to point at Neon to land results in Studio.)
+
+---
+
+## OAuth flow
+
+OAuth (auth-code + refresh, public client + PKCE + DCR) is built, deployed, and **proven
+end-to-end against a live Voiceflow auth server** (consent → token exchange → Postgres
+persistence in `oauth_kv` → auto-refresh). Off by default (`VF_AUTH_MODE` unset → `token`).
+Callback is fixed at `https://copilot-mastra.vercel.app/oauth/callback` (must be DCR/allow-listed).
+
+**Config knobs**
+- `VF_AUTH_MODE=oauth` — turn it on
+- `VF_MCP_URL` — MCP server to connect to (default prod `https://mcp.voiceflow.com/mcp`)
+- `VF_OAUTH_AUTH_SERVER` — override the auth server, skipping MCP discovery (use when the MCP
+  doesn't advertise its auth server). Provider gets a `discoveryState()` so `auth()` skips rediscovery.
+- `VF_OAUTH_RESOURCE` — override the RFC 8707 `resource` indicator (use when the auth server's
+  resource allowlist differs from `VF_MCP_URL`). Without this, the SDK derives `resource` from
+  PRM; if discovery is skipped and there's no PRM, `resource` is sent from `validateResourceURL()`.
+
+### Prod cutover — the real path (pending Ben's deploy, ETA 2026-06-24)
+
+Prod discovery is **already** wired correctly:
+- PRM `mcp.voiceflow.com/.well-known/oauth-protected-resource` → `resource: https://mcp.voiceflow.com/mcp`,
+  `authorization_servers: [https://auth-api.voiceflow.com]`
+- Auth metadata `auth-api.voiceflow.com/.well-known/oauth-authorization-server` → authorize/token/register endpoints
+
+So **no overrides are needed** on prod — `auth()` discovers the auth server + resource from PRM.
+
+**Readiness check** (prod DCR is currently broken → 500; ready when it returns a `client_id`):
+```bash
+curl -sX POST https://auth-api.voiceflow.com/v1alpha1/oauth2/register \
+  -H 'content-type: application/json' \
+  -d '{"redirect_uris":["https://copilot-mastra.vercel.app/oauth/callback"],"token_endpoint_auth_method":"none","grant_types":["authorization_code","refresh_token"],"response_types":["code"]}'
+```
+
+**Once ready — clean deploy (NO `VF_OAUTH_AUTH_SERVER`, NO `VF_OAUTH_RESOURCE`):**
+```bash
+rm -rf .vercel .mastra && VERCEL_FN_MAX_DURATION=300 npm run build
+vercel deploy --prebuilt --prod --archive=tgz --scope voiceflow --token "$(cat scratchpad/.vctoken)" \
+  -e GLM_API_KEY="$GLM_API_KEY" -e VF_AUTH_MODE=oauth -e MASTRA_TELEMETRY_DISABLED=1 --yes
+```
+Then: visit `/oauth/start` → **prod** login + consent once → `/oauth/status` → `hasTokens:true`
+→ `/_diag/mcp` → `tools > 0` (real tools load this time). ⚠️ Acts on the consenting user's **live** workspace.
+
+### Review env (dry-tree) — blocked server-side (tested 2026-06-23)
+
+Two review-env bugs (reported to Ben), both server-side:
+- Auth `auth-api-review-dry-tree…/v1alpha1/oauth2/authorize`: requires `resource` but **500s** on
+  every value except the prod MCP URL (the review MCP URL isn't in its resource allowlist; unknown
+  resource → unhandled 500 instead of a clean 4xx).
+- MCP `mcp-review-dry-tree…/mcp`: **503**.
+
+Workaround used only to prove the auth handshake mechanics (NOT a working path):
+`-e VF_OAUTH_AUTH_SERVER=https://auth-api-review-dry-tree.us.development.voiceflow.com`
+`-e VF_OAUTH_RESOURCE=https://mcp.voiceflow.com/mcp` (+ `VF_MCP_URL=review`). This reaches consent
+and mints a token, but it's review-issued with a prod audience → no live MCP will accept it.
+**Superseded by the prod cutover above** once Ben's fix is deployed.
+
+Notes: tokens auto-refresh after one-time consent. `OAuth start failed` on `/oauth/start` usually
+means DCR rejected our `redirect_uri` (confirm it's allow-listed) — but a JSON `{statusCode,message}`
+error is the **auth server's** (e.g. the review 500/422), not ours (ours is plain text).
 
 ## Kill switches / rollback
 
@@ -149,6 +236,7 @@ it's allow-listed on the env you pointed `VF_MCP_URL` at.
 
 - **Diag:** `GET /_diag/storage`, `GET /_diag/mcp`
 - **Env vars:** `GLM_API_KEY`, `VF_MCP_TOKEN`, `DATABASE_URL` (Neon, auto), `MEMORY_TOKEN_BUDGET` (opt), `OM_DISABLED` (opt), `VERCEL_FN_MAX_DURATION` (build)
+- **OAuth env vars:** `VF_AUTH_MODE` (`token`|`oauth`), `VF_MCP_URL` (default prod), `VF_OAUTH_AUTH_SERVER` (opt override), `VF_OAUTH_RESOURCE` (opt RFC 8707 override), `OAUTH_REDIRECT_URL` (default prod callback)
 - **Models:** main `accounts/fireworks/models/glm-5p2` · triage `accounts/fireworks/models/deepseek-v4-flash` (also runs OM Observer/Reflector) · embeddings `nomic-ai/nomic-embed-text-v1.5`
 - **Memory stack:** lastMessages(100) + resource-scoped working memory + resource-scoped semantic recall + token-budget backstop(96k) + thread-scoped Observational Memory (compaction)
 - **Branch:** `claude/lucid-shannon-nf4olw`

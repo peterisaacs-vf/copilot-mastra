@@ -57,4 +57,10 @@ export class PgOAuthStorage implements OAuthStorage {
     await this.init();
     await this.pool.query(`DELETE FROM ${TABLE} WHERE k = $1`, [key]);
   }
+
+  /** Clear ALL stored OAuth state (registered client, PKCE verifier, tokens). */
+  async clearAll(): Promise<void> {
+    await this.init();
+    await this.pool.query(`DELETE FROM ${TABLE}`);
+  }
 }

@@ -49,7 +49,7 @@ Compare these sections and report differences:
 3. **Default Models** — any model changes
 4. **Agents** — added, removed, or modified agents
    - For modified agents: diff instructions text, settings, tool configs
-5. **Crew Configuration** — operator changes, sub-agent routing changes
+5. **Crew Configuration** — main agent changes, sub-agent routing changes
 6. **Functions** — added, removed, or modified functions
    - For modified functions: diff code
 7. **Function Variables** — added, removed, or modified variables per function
@@ -165,7 +165,7 @@ After the raw diff, provide a brief interpretation:
 
 Production and dev copies won't have the same agent IDs. Match by:
 1. **Name** — exact match first
-2. **isOperator** — match operator to operator
+2. **isOperator** — match main agent to main agent
 3. **Description similarity** — fuzzy match on description/scope
 4. Unmatched agents are flagged as "added" or "removed"
 

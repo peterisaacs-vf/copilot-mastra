@@ -20,6 +20,10 @@ export const env = {
     // emits clean structured JSON (validated in the model bake-off). Used by the
     // mechanical workers (audit-kb / setup-evals / test-runner). Override via env.
     modelTriage: optional('GLM_MODEL_TRIAGE', 'accounts/fireworks/models/deepseek-v4-flash'),
+    // Eval JUDGE tier — deliberately a NEUTRAL family (not GLM/DeepSeek) to avoid
+    // self-preference bias. Kimi K2.6 (Moonshot) benchmarked on par with Claude's
+    // reference verdicts on routing judgments. Override via GLM_MODEL_JUDGE.
+    modelJudge: optional('GLM_MODEL_JUDGE', 'accounts/fireworks/models/kimi-k2p6'),
   },
   vf: {
     mcpUrl: optional('VF_MCP_URL', 'https://mcp.voiceflow.com/mcp'),
@@ -36,6 +40,19 @@ export const env = {
     // public client, so a secret is normally not needed.
     oauthClientId: optional('VF_OAUTH_CLIENT_ID'),
     oauthClientSecret: optional('VF_OAUTH_CLIENT_SECRET'),
+    // Override the OAuth authorization server, skipping discovery from the MCP server. Use
+    // when the MCP server advertises a different / unreachable auth server than the one you
+    // want to authenticate against (e.g. a review env whose MCP isn't wired to its auth
+    // server yet). When set, the provider forces this as the authorization server and still
+    // fetches its OAuth endpoints via this server's RFC 8414 discovery doc.
+    oauthAuthServer: optional('VF_OAUTH_AUTH_SERVER'),
+    // Override the RFC 8707 `resource` indicator sent in the authorize/token/refresh
+    // requests. Normally the resource is derived from the MCP server's Protected Resource
+    // Metadata (or falls back to VF_MCP_URL). Set this when the authorization server expects
+    // a specific registered resource that differs from the MCP URL we connect to — e.g. a
+    // review auth server whose resource allowlist only contains the production MCP URL. This
+    // decouples the audience/resource indicator from the actual MCP connection target.
+    oauthResource: optional('VF_OAUTH_RESOURCE'),
   },
 } as const;
 

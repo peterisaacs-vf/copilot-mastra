@@ -1,6 +1,6 @@
 import { MCPClient } from '@mastra/mcp';
 import { env, useVoiceflowOAuth } from '../config/env';
-import { makeVoiceflowOAuthProvider } from './oauth';
+import { makeVoiceflowAuthFetch } from './oauth';
 
 /**
  * The Voiceflow MCP is the agents' toolset (transcripts, prompts, KB, evals,
@@ -13,12 +13,20 @@ import { makeVoiceflowOAuthProvider } from './oauth';
  */
 export function createVoiceflowMcp(): MCPClient {
   if (useVoiceflowOAuth()) {
+    // NOTE: we do NOT pass an `authProvider`. Voiceflow access tokens live ~60s and the
+    // SDK's OAuth provider forces a refresh on every connect and re-runs the full
+    // authorization flow on any refresh hiccup — which fails headless and boots 0 tools.
+    // Instead we run in plain-bearer mode with a custom `fetch` that injects a freshly
+    // minted token per request (see makeVoiceflowAuthFetch / the token manager in oauth.ts).
     return new MCPClient({
       id: 'voiceflow',
       servers: {
         voiceflow: {
           url: new URL(env.vf.mcpUrl),
-          authProvider: makeVoiceflowOAuthProvider(),
+          fetch: makeVoiceflowAuthFetch() as any,
+          // Cold connect to the prod MCP can exceed the 3s default; give it headroom.
+          connectTimeout: 30000,
+          timeout: 30000,
         },
       },
     });
@@ -37,6 +45,8 @@ export function createVoiceflowMcp(): MCPClient {
         requestInit: {
           headers: { Authorization: `Bearer ${env.vf.mcpToken}` },
         },
+        connectTimeout: 30000,
+        timeout: 30000,
       },
     },
   });
